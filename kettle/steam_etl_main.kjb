@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<job>
+  <name>steam_etl_main</name>
+  <description>Steam游戏销量估算系统主ETL作业：串联清洗转换、SCD2价格拉链转换与SQL视图更新</description>
+  <job_version>1.0</job_version>
+  <directory>/</directory>
+  <entries>
+    <entry>
+      <name>START</name>
+      <type>SPECIAL</type>
+      <start>Y</start>
+      <parallel>N</parallel>
+    </entry>
+    <entry>
+      <name>执行转换_清洗与对齐Steam游戏数据</name>
+      <type>TRANS</type>
+      <filename>${Internal.Entry.Current.Directory}/clean_steam_games.ktr</filename>
+    </entry>
+    <entry>
+      <name>执行转换_更新SCD2价格历史拉链表</name>
+      <type>TRANS</type>
+      <filename>${Internal.Entry.Current.Directory}/scd2_price_history.ktr</filename>
+    </entry>
+    <entry>
+      <name>执行SQL脚本_刷新M0_M1与FineBI视图</name>
+      <type>SQL</type>
+      <sqlfromfile>Y</sqlfromfile>
+      <sqlfilename>${Internal.Entry.Current.Directory}/../sql/02_views_and_models_mysql.sql</sqlfilename>
+    </entry>
+    <entry>
+      <name>成功完成</name>
+      <type>SUCCESS</type>
+    </entry>
+  </entries>
+  <hops>
+    <hop><from>START</from><to>执行转换_清洗与对齐Steam游戏数据</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>Y</unconditional></hop>
+    <hop><from>执行转换_清洗与对齐Steam游戏数据</from><to>执行转换_更新SCD2价格历史拉链表</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>N</unconditional></hop>
+    <hop><from>执行转换_更新SCD2价格历史拉链表</from><to>执行SQL脚本_刷新M0_M1与FineBI视图</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>N</unconditional></hop>
+    <hop><from>执行SQL脚本_刷新M0_M1与FineBI视图</from><to>成功完成</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>N</unconditional></hop>
+  </hops>
+</job>

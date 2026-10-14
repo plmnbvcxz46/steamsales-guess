@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<transformation>
+  <info>
+    <name>scd2_price_history</name>
+    <description>游戏价格维度 SCD Type 2 缓慢变化维拉链更新转换</description>
+    <extended_description>使用 Kettle 维度查询/更新 (DimensionLookup) 组件自动维护 effective_start, effective_end, version_no, is_current</extended_description>
+    <trans_version>1.0</trans_version>
+    <trans_type>Normal</trans_type>
+    <directory>/</directory>
+  </info>
+  <connection>
+    <name>Steam_MySQL_DW</name>
+    <server>localhost</server>
+    <type>MYSQL</type>
+    <access>Native</access>
+    <database>steam_sales_dw</database>
+    <port>3306</port>
+    <username>root</username>
+    <password>Encrypted 2be98afc86aa7f2e4cb79ce10cc9da0ce</password>
+  </connection>
+  <order>
+    <hop>
+      <from>CSV文件输入_价格变动事件流(sim_price_changes)</from>
+      <to>维度查询与更新_SCD2价格历史维(dim_price_scd2)</to>
+      <enabled>Y</enabled>
+    </hop>
+  </order>
+  <step>
+    <name>CSV文件输入_价格变动事件流(sim_price_changes)</name>
+    <type>CsvInput</type>
+    <filename>${Internal.Entry.Current.Directory}/../data/simulated/sim_price_changes.csv</filename>
+    <delimiter>,</delimiter>
+    <header>Y</header>
+    <encoding>UTF-8</encoding>
+    <fields>
+      <field><name>appid</name><type>Integer</type></field>
+      <field><name>name</name><type>String</type></field>
+      <field><name>price_usd</name><type>Number</type></field>
+      <field><name>discount_pct</name><type>Integer</type></field>
+      <field><name>final_price_usd</name><type>Number</type></field>
+      <field><name>change_date</name><type>Date</type></field>
+      <field><name>event_type</name><type>String</type></field>
+    </fields>
+  </step>
+  <step>
+    <name>维度查询与更新_SCD2价格历史维(dim_price_scd2)</name>
+    <type>DimensionLookup</type>
+    <description>当 final_price_usd 或 discount_pct 发生变化时，闭合旧记录并插入新版本 (Insert New Version)</description>
+    <connection>Steam_MySQL_DW</connection>
+    <table>dim_price_scd2</table>
+    <update>Y</update>
+    <date>
+      <name>change_date</name>
+      <from>effective_start</from>
+      <to>effective_end</to>
+    </date>
+    <fields>
+      <key>
+        <name>appid</name>
+        <lookup>appid</lookup>
+      </key>
+      <field>
+        <name>final_price_usd</name>
+        <lookup>final_price_usd</lookup>
+        <update>Insert</update>
+      </field>
+      <field>
+        <name>discount_pct</name>
+        <lookup>discount_percent</lookup>
+        <update>Insert</update>
+      </field>
+      <field>
+        <name>event_type</name>
+        <lookup>event_type</lookup>
+        <update>Insert</update>
+      </field>
+      <return>
+        <name>price_scd_key</name>
+        <creation_method>autoinc</creation_method>
+        <version>version_no</version>
+      </return>
+    </fields>
+    <min_year>2000</min_year>
+    <max_year>9999</max_year>
+  </step>
+</transformation>
