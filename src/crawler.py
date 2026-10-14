@@ -18,7 +18,7 @@ import json
 import pathlib
 import requests
 
-BASE_DIR = pathlib.Path(__file__).resolve().parent.parent
+BASE_DIR = pathlib.Path("/tmp/steamsales-guess")
 CACHE_DIR = BASE_DIR / "data" / "cache"
 CHECKPOINT_FILE = CACHE_DIR / "crawler_checkpoint.json"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
