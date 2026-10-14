@@ -1,0 +1,414 @@
+appid,name,cutoff_date,total_reviews_2018,total_positive_2018,total_negative_2018,positive_rate_2018,schinese_review_ratio,avg_playtime_at_review_hrs,steamspy_avg_forever_min,steamcharts_total_player_hours,steamcharts_avg_ccu,api_endpoint
+440,Team Fortress 2,2018-07-01,434722,406465,28257,0.935,0.08,48.5,2291,1916885749,19028.0,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+304930,Unturned,2018-07-01,263551,240359,23192,0.912,0.12,26.4,1137,518681928,39473.5,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+230410,Warframe,2018-07-01,176010,161049,14961,0.915,0.18,64.2,2840,772933217,16042.6,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+444090,Paladins,2018-07-01,185871,158362,27509,0.852,0.09,29.5,1341,321101651,73310.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+301520,Robocraft,2018-07-01,71720,51495,20225,0.718,0.14,22.1,937,158520673,12064.0,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+236390,War Thunder,2018-07-01,66841,53139,13702,0.795,0.22,52.0,2409,382969809,7948.7,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+291550,Brawlhalla,2018-07-01,62632,52924,9708,0.845,0.07,24.8,1021,147118146,11196.2,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+304050,Trove,2018-07-01,55934,43908,12026,0.785,0.16,31.2,1331,170821771,5571.5,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+238960,Path of Exile,2018-07-01,78604,72630,5974,0.924,0.11,58.6,2593,329933583,6847.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+224260,No More Room in Hell,2018-07-01,51077,45561,5516,0.892,0.25,14.3,617,73457792,1118.1,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+630,Alien Swarm,2018-07-01,37761,35684,2077,0.945,0.15,11.2,529,58763569,789.2,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+386360,SMITE,2018-07-01,45921,36966,8955,0.805,0.06,36.4,1607,154037967,5024.1,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+431960,Wallpaper Engine,2018-07-01,91101,89097,2004,0.978,0.62,18.5,756,66511880,3037.1,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+1840,Source Filmmaker,2018-07-01,11610,10774,836,0.928,0.14,25.0,1032,31871308,559.7,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+223850,3DMark,2018-07-01,7528,6888,640,0.915,0.48,6.2,281,2409320,50.0,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+999001,Shadow Tactics Demo,2018-07-01,1308,1230,78,0.94,0.32,2.1,96,226817,10.4,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+999002,Corrupted Price Record RPG,2018-07-01,3857,3163,694,0.82,0.2,12.0,533,2178416,165.8,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+999003,Zero Review Test App,2018-07-01,0,0,0,0.0,0.0,0.0,0,0,0.0,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+730,Counter-Strike: Global Offensive,2018-07-01,1114790,994393,120397,0.892,0.24,165.0,6947,5361617323,94162.6,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+578080,PLAYERUNKNOWN'S BATTLEGROUNDS,2018-07-01,1428917,774473,654444,0.542,0.58,142.0,6520,3977491261,302701.0,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+550,Left 4 Dead 2,2018-07-01,365683,353981,11702,0.968,0.35,42.5,1853,714702457,8588.1,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+218620,PAYDAY 2,2018-07-01,400913,354407,46506,0.884,0.19,54.0,2319,720446484,14953.2,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+4000,Garry's Mod,2018-07-01,336774,323977,12797,0.962,0.12,118.0,5550,1718357827,15692.8,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+240,Counter-Strike: Source,2018-07-01,218772,209584,9188,0.958,0.09,68.0,2970,742663086,5846.8,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+72850,The Elder Scrolls V: Skyrim,2018-07-01,337842,319599,18243,0.946,0.14,96.5,4542,1001862514,15249.0,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+105600,Terraria,2018-07-01,281263,273950,7313,0.974,0.22,88.4,3867,846392456,12882.7,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+620,Portal 2,2018-07-01,236124,232582,3542,0.985,0.18,19.5,886,192898678,2936.1,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+8930,Sid Meier's Civilization V,2018-07-01,320079,307596,12483,0.961,0.21,112.0,5170,1094512244,14699.3,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+271590,Grand Theft Auto V,2018-07-01,365682,264754,100928,0.724,0.42,108.5,4533,952250689,31058.4,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+49520,Borderlands 2,2018-07-01,243860,232155,11705,0.952,0.16,48.2,1965,367403382,6452.5,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+252950,Rocket League,2018-07-01,270418,250948,19470,0.928,0.08,76.4,3273,551566401,17989.8,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+400,Portal,2018-07-01,141259,138716,2543,0.982,0.15,8.4,353,58693074,582.6,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+252490,Rust,2018-07-01,322403,263726,58677,0.818,0.16,124.0,5455,831699410,189885.7,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+346110,ARK: Survival Evolved,2018-07-01,262792,181852,80940,0.692,0.28,136.0,5493,833488432,63431.4,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+220,Half-Life 2,2018-07-01,123086,119640,3446,0.972,0.14,16.8,794,117443042,924.6,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+219640,Chivalry: Medieval Warfare,2018-07-01,138329,115505,22824,0.835,0.11,24.5,1017,139960976,2458.0,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+1250,Killing Floor,2018-07-01,155522,146502,9020,0.942,0.1,32.0,1333,164365145,1975.1,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+113200,The Binding of Isaac,2018-07-01,152500,145028,7472,0.951,0.14,38.6,1576,188445029,2868.3,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+377160,Fallout 4,2018-07-01,136990,96989,40001,0.708,0.24,78.5,3321,365423359,11918.6,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+107410,Arma 3,2018-07-01,162792,145862,16930,0.896,0.15,115.0,4728,504663548,10474.5,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+255710,Cities: Skylines,2018-07-01,154540,143413,11127,0.928,0.29,56.4,2303,235385854,7677.3,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+222880,Insurgency,2018-07-01,97089,87866,9223,0.905,0.18,28.4,1338,133929368,3397.5,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+227300,Euro Truck Simulator 2,2018-07-01,171121,165645,5476,0.968,0.26,62.0,2695,268690565,4718.8,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+221380,Age of Empires II HD,2018-07-01,142105,134289,7816,0.945,0.22,46.8,2177,211295650,4385.5,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+381210,Dead by Daylight,2018-07-01,145735,113382,32353,0.778,0.34,82.0,3764,361174788,16492.0,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+204360,Castle Crashers,2018-07-01,135187,130050,5137,0.962,0.21,18.2,797,73756096,1295.3,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+242760,The Forest,2018-07-01,188724,175136,13588,0.928,0.31,34.6,1430,132292935,30203.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+203160,Tomb Raider,2018-07-01,132880,127299,5581,0.958,0.25,18.5,843,77220797,1602.8,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+292030,The Witcher 3: Wild Hunt,2018-07-01,203016,198144,4872,0.976,0.36,74.2,3294,300805882,9811.0,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+206420,Saints Row IV,2018-07-01,100850,91572,9278,0.908,0.14,22.4,944,82984226,1722.4,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+10180,Call of Duty: Modern Warfare 2,2018-07-01,75421,68784,6637,0.912,0.11,36.8,1590,139621203,1677.7,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+22380,Fallout: New Vegas,2018-07-01,115406,110905,4501,0.961,0.12,54.2,2268,197439682,2651.6,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+55230,Saints Row: The Third,2018-07-01,93283,88992,4291,0.954,0.15,25.6,1184,101520406,1545.2,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+42910,Magicka,2018-07-01,78413,70729,7684,0.902,0.1,14.8,651,53993180,821.8,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+200710,Torchlight II,2018-07-01,124798,117435,7363,0.941,0.28,36.5,1701,140749485,2471.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+24240,PAYDAY The Heist,2018-07-01,89318,81994,7324,0.918,0.12,16.4,686,56550596,860.7,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+413150,Stardew Valley,2018-07-01,148180,144920,3260,0.978,0.27,68.4,3089,252966668,11551.0,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+231430,Company of Heroes 2,2018-07-01,87989,68983,19006,0.784,0.24,48.2,2113,163899385,3401.8,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+500,Left 4 Dead,2018-07-01,74450,71025,3425,0.954,0.16,24.5,1130,86720619,942.8,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+20920,The Witcher 2: Assassins of Kings Enhanced Edition,2018-07-01,97324,87105,10219,0.895,0.19,24.8,1040,79501290,1210.1,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+8870,BioShock Infinite,2018-07-01,117732,112081,5651,0.952,0.21,18.6,778,59208353,1228.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+33930,Arma 2: Operation Arrowhead,2018-07-01,74564,68151,6413,0.914,0.08,44.2,1929,145168208,1949.6,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+241930,Middle-earth: Shadow of Mordor,2018-07-01,111903,102503,9400,0.916,0.18,26.4,1166,86829758,2202.7,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+300,Day of Defeat: Source,2018-07-01,51115,46412,4703,0.908,0.07,32.1,1309,96427522,815.4,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+489830,The Elder Scrolls V: Skyrim Special Edition,2018-07-01,175707,160245,15462,0.912,0.23,64.5,2890,211865047,9674.2,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+211820,Starbound,2018-07-01,98392,89143,9249,0.906,0.21,46.2,1941,139427114,6366.5,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+48700,Mount & Blade: Warband,2018-07-01,98756,95892,2864,0.971,0.34,92.4,3751,263775913,3542.5,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+244850,Space Engineers,2018-07-01,93002,81377,11625,0.875,0.14,58.0,2502,175332316,3639.1,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+251570,7 Days to Die,2018-07-01,100227,84391,15836,0.842,0.25,74.6,3388,236292718,4904.4,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+91310,Dead Island,2018-07-01,70442,58044,12398,0.824,0.13,21.5,871,60733109,924.4,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+8190,Just Cause 2,2018-07-01,62778,57630,5148,0.918,0.12,22.8,969,67203192,902.5,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+8980,Borderlands,2018-07-01,69490,63375,6115,0.912,0.1,28.4,1170,79566893,956.1,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+265930,Goat Simulator,2018-07-01,67287,60020,7267,0.892,0.16,11.2,458,31047797,787.6,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+319630,Life is Strange - Episode 1,2018-07-01,76479,73573,2906,0.962,0.22,16.5,745,49877309,1626.8,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+232090,Killing Floor 2,2018-07-01,95922,84795,11127,0.884,0.21,38.4,1626,107849712,4924.6,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+380,Half-Life 2: Episode One,2018-07-01,44963,42625,2338,0.948,0.12,6.8,293,19162996,175.0,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+42700,Call of Duty: Black Ops,2018-07-01,70438,60929,9509,0.865,0.09,29.5,1240,77690984,1043.4,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+205100,Dishonored,2018-07-01,63868,61824,2044,0.968,0.19,18.4,846,52153255,915.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+289070,Sid Meier's Civilization VI,2018-07-01,106489,72945,33544,0.685,0.38,72.0,3332,204377521,9332.3,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+238460,BattleBlock Theater,2018-07-01,74223,72145,2078,0.972,0.24,15.6,660,39656560,1006.0,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+391540,Undertale,2018-07-01,96674,93194,3480,0.964,0.19,14.2,661,39440556,1286.4,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+35450,Red Orchestra 2: Heroes of Stalingrad with Rising Storm,2018-07-01,58574,53654,4920,0.916,0.14,34.2,1380,80531170,1225.7,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+10500,Empire: Total War,2018-07-01,64366,57414,6952,0.892,0.15,64.0,2914,169561707,2037.5,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+239140,Dying Light,2018-07-01,98839,93106,5733,0.942,0.32,36.8,1491,86158536,2810.1,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+214950,Total War: ROME II - Emperor Edition,2018-07-01,89392,73659,15733,0.824,0.22,78.4,3319,185325886,3846.5,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+374320,DARK SOULS III,2018-07-01,97497,90087,7410,0.924,0.39,68.5,3208,176132572,8042.6,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+211420,DARK SOULS: Prepare To Die Edition,2018-07-01,75045,67691,7354,0.902,0.21,52.4,2386,130800484,2297.2,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+420,Half-Life 2: Episode Two,2018-07-01,34379,33073,1306,0.962,0.13,8.2,387,21186605,210.3,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+48000,LIMBO,2018-07-01,50803,47653,3150,0.938,0.18,6.4,278,14856247,226.1,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+379720,DOOM,2018-07-01,62942,59543,3399,0.946,0.21,21.8,907,48356567,2208.1,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+203770,Crusader Kings II,2018-07-01,70167,63501,6666,0.905,0.16,86.0,3953,208887065,3668.5,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+477160,Human: Fall Flat,2018-07-01,72598,66645,5953,0.918,0.45,16.4,771,39798212,1817.3,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+311210,Call of Duty: Black Ops III,2018-07-01,48995,37628,11367,0.768,0.22,42.5,1789,90113225,2939.1,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+202970,Call of Duty: Black Ops II,2018-07-01,64145,55421,8724,0.864,0.14,38.2,1605,80213937,1408.7,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+40800,Super Meat Boy,2018-07-01,40835,38467,2368,0.942,0.11,14.5,663,32804193,440.6,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+63380,Sniper Elite V2,2018-07-01,53599,47971,5628,0.895,0.15,13.8,558,27391855,481.1,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+264710,Subnautica,2018-07-01,93743,89806,3937,0.958,0.26,36.2,1626,77672039,17733.3,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+233450,Prison Architect,2018-07-01,68477,63547,4930,0.928,0.2,34.5,1616,76919409,2508.8,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+207610,The Walking Dead,2018-07-01,43561,42080,1481,0.966,0.18,14.2,597,28312605,497.2,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+282070,This War of Mine,2018-07-01,59089,55839,3250,0.945,0.34,21.6,1009,47385527,1202.1,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+238320,Outlast,2018-07-01,62957,60313,2644,0.958,0.25,9.8,434,20352770,422.4,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+203140,Hitman: Absolution,2018-07-01,48043,43815,4228,0.912,0.17,16.4,664,31049331,545.3,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+35720,Trine 2: Complete Story,2018-07-01,52112,49715,2397,0.954,0.22,11.8,484,22526752,342.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+250900,The Binding of Isaac: Rebirth,2018-07-01,81046,78777,2269,0.972,0.28,94.0,3813,175172753,4443.8,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+207140,SpeedRunners,2018-07-01,63169,59063,4106,0.935,0.15,16.2,694,31838736,1453.8,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+57300,Amnesia: The Dark Descent,2018-07-01,43310,41231,2079,0.952,0.12,9.4,400,17379420,233.4,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+65980,Sid Meier's Civilization: Beyond Earth,2018-07-01,69775,39353,30422,0.564,0.21,32.5,1335,58012939,1471.7,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+210770,Sanctum 2,2018-07-01,59422,54431,4991,0.916,0.14,14.2,609,26407974,548.1,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+219150,Hotline Miami,2018-07-01,54356,52780,1576,0.971,0.16,9.6,415,17859285,313.7,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+107100,Bastion,2018-07-01,43164,41351,1813,0.958,0.15,10.8,436,18746280,285.3,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+213670,South Park: The Stick of Truth,2018-07-01,69700,67470,2230,0.968,0.16,18.2,855,36114265,916.1,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+15620,"Warhammer 40,000: Dawn of War II",2018-07-01,43587,39839,3748,0.914,0.14,28.5,1232,51163667,614.8,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+391220,Rise of the Tomb Raider,2018-07-01,83872,78169,5703,0.932,0.34,24.6,1116,46353420,2116.6,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+65800,Dungeon Defenders,2018-07-01,55999,51743,4256,0.924,0.12,42.0,1691,69996978,1065.4,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+200260,Batman: Arkham City - Game of the Year Edition,2018-07-01,43265,41275,1990,0.954,0.18,22.4,903,37160164,652.6,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+209080,Guns of Icarus Online,2018-07-01,30520,27834,2686,0.912,0.1,14.5,672,27151220,476.8,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+225540,Just Cause 3,2018-07-01,53088,40559,12529,0.764,0.25,28.4,1291,50444277,1645.3,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+50130,Mafia II,2018-07-01,30341,28460,1881,0.938,0.18,18.2,736,28365091,380.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+239030,"Papers, Please",2018-07-01,43252,41868,1384,0.968,0.22,9.5,414,15914996,330.3,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+216250,Dead Island Riptide,2018-07-01,32748,24823,7925,0.758,0.14,16.8,776,29752097,617.5,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+286160,Tabletop Simulator,2018-07-01,67118,63628,3490,0.948,0.14,42.6,1877,71897064,2345.0,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+431240,Golf With Your Friends,2018-07-01,39679,35394,4285,0.892,0.16,14.8,613,23213100,1060.0,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+35140,Batman: Arkham Asylum Game of the Year Edition,2018-07-01,45420,43512,1908,0.958,0.17,16.4,670,25000382,335.8,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+268500,XCOM 2,2018-07-01,67665,55350,12315,0.818,0.26,54.2,2267,83969924,3834.2,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+262060,Darkest Dungeon,2018-07-01,62138,54992,7146,0.885,0.31,46.8,1996,73664945,3363.7,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+34030,Napoleon: Total War,2018-07-01,33518,30702,2816,0.916,0.16,48.5,2254,81841996,1099.1,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+261640,Borderlands: The Pre-Sequel,2018-07-01,46777,37796,8981,0.808,0.18,28.4,1281,46468759,1178.8,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+113020,Monaco: What's Yours Is Mine,2018-07-01,38370,34840,3530,0.908,0.11,8.6,386,13869457,287.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+360430,How to Survive 2,2018-07-01,54805,37487,17318,0.684,0.22,18.4,869,31147911,1422.3,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+242920,Banished,2018-07-01,51310,46076,5234,0.898,0.24,28.6,1159,41467686,1051.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+91600,Sanctum,2018-07-01,37105,33840,3265,0.912,0.1,11.4,492,17118759,260.6,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+364360,Total War: WARHAMMER,2018-07-01,58819,45173,13646,0.768,0.28,68.2,2862,99469625,4542.0,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+41070,Serious Sam 3: BFE,2018-07-01,29164,25606,3558,0.878,0.15,13.5,589,19931511,303.4,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+286690,Metro 2033 Redux,2018-07-01,47790,42820,4970,0.896,0.24,14.8,623,21040354,533.7,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+674940,Stick Fight: The Game,2018-07-01,37486,34637,2849,0.924,0.36,11.5,510,17052080,1297.7,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+246620,Plague Inc: Evolved,2018-07-01,39547,37095,2452,0.938,0.38,18.4,761,25395440,1159.6,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+57690,Tropico 4,2018-07-01,37200,34001,3199,0.914,0.18,24.2,1063,35425152,539.2,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+4920,Natural Selection 2,2018-07-01,27850,24062,3788,0.864,0.09,26.8,1254,41672259,731.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+236850,Europa Universalis IV,2018-07-01,54753,46978,7775,0.858,0.18,128.0,5215,172423435,3578.7,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+281990,Stellaris,2018-07-01,48537,40868,7669,0.842,0.29,84.5,3653,119755144,5468.3,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+223470,POSTAL 2,2018-07-01,21269,20333,936,0.956,0.18,12.6,515,16394622,120.7,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+233720,Surgeon Simulator,2018-07-01,28834,24451,4383,0.848,0.14,6.8,321,10058793,208.8,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+305620,The Long Dark,2018-07-01,62216,56741,5475,0.912,0.22,32.4,1459,45607128,3470.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+274190,Broforce,2018-07-01,46161,44684,1477,0.968,0.24,14.2,625,19405994,632.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+274940,Depth,2018-07-01,36651,32693,3958,0.892,0.21,22.5,954,29472417,747.7,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+209000,Batman: Arkham Origins,2018-07-01,33712,29127,4585,0.864,0.18,18.6,877,27069623,561.8,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+235540,Warhammer: End Times - Vermintide,2018-07-01,28820,23748,5072,0.824,0.19,26.4,1193,36645011,1195.2,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+248820,Risk of Rain,2018-07-01,44071,41250,2821,0.936,0.18,21.4,962,29264086,607.4,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+201810,Wolfenstein: The New Order,2018-07-01,31900,28838,3062,0.904,0.19,15.8,684,20749548,526.4,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+238090,Sniper Elite 3,2018-07-01,46339,37905,8434,0.818,0.18,16.2,747,22546187,571.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+108710,Alan Wake,2018-07-01,28508,26113,2395,0.916,0.16,13.4,559,16823280,295.5,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+234140,Mad Max,2018-07-01,38879,35302,3577,0.908,0.21,28.6,1155,34164468,1114.3,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+287700,METAL GEAR SOLID V: THE PHANTOM PAIN,2018-07-01,36183,32782,3401,0.906,0.28,62.4,2552,74447959,2428.2,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+204100,Max Payne 3,2018-07-01,29564,25898,3666,0.876,0.17,16.8,693,20093377,352.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+268910,Cuphead,2018-07-01,48017,46000,2017,0.958,0.26,16.5,728,21062434,1602.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+200170,Worms Revolution,2018-07-01,29636,25309,4327,0.854,0.12,11.4,504,14527545,255.1,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+245620,Tropico 5,2018-07-01,29516,22963,6553,0.778,0.21,22.4,942,26976139,684.3,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+427520,Factorio,2018-07-01,58059,57130,929,0.984,0.24,112.0,5084,144601339,6602.8,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+239820,Game Dev Tycoon,2018-07-01,28672,27296,1376,0.952,0.25,18.6,851,24064501,499.5,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+285900,Gang Beasts,2018-07-01,35695,28021,7674,0.785,0.22,12.8,586,16498867,1255.6,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+435150,Divinity: Original Sin 2,2018-07-01,60925,58244,2681,0.956,0.32,82.5,3766,106017775,8068.3,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+50620,Darksiders,2018-07-01,23881,21302,2579,0.892,0.16,16.4,704,19750437,265.2,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+493340,Planet Coaster,2018-07-01,42188,37800,4388,0.896,0.24,38.2,1674,46943707,2143.5,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+233130,Shadow Warrior,2018-07-01,30999,28891,2108,0.932,0.18,14.2,663,18216314,378.1,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+3590,Plants vs. Zombies GOTY Edition,2018-07-01,26799,26156,643,0.976,0.35,24.5,1107,30378906,365.0,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+320300,Car Mechanic Simulator 2015,2018-07-01,45400,41223,4177,0.908,0.19,22.8,969,26356944,859.7,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+245170,Skullgirls,2018-07-01,28723,27402,1321,0.954,0.14,18.4,847,22892827,475.2,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+242050,Assassin's Creed IV Black Flag,2018-07-01,37955,33856,4099,0.892,0.28,34.6,1557,41945292,870.6,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+35700,Trine Enchanted Edition,2018-07-01,22701,21611,1090,0.952,0.19,9.8,405,10824808,130.1,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+393380,Squad,2018-07-01,40590,35882,4708,0.884,0.26,68.4,2792,74566039,2432.0,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+110800,L.A. Noire,2018-07-01,29785,24870,4915,0.835,0.15,19.2,891,23706772,360.8,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+12900,AudioSurf,2018-07-01,25758,24573,1185,0.954,0.12,14.6,662,17235819,187.4,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+214560,Mark of the Ninja,2018-07-01,29278,28341,937,0.968,0.21,12.8,598,15554798,273.2,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+8850,BioShock 2,2018-07-01,25430,21717,3713,0.854,0.16,13.6,559,14514771,194.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+208140,Endless Space - Collection,2018-07-01,26140,21539,4601,0.824,0.15,24.8,1088,28080829,493.2,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+236870,HITMAN,2018-07-01,36135,29342,6793,0.812,0.22,28.4,1188,30379186,1387.2,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+326460,ShellShock Live,2018-07-01,29613,26711,2902,0.902,0.11,24.2,1024,26089018,850.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+208580,STAR WARS Knights of the Old Republic II - The Sith Lords,2018-07-01,30201,28027,2174,0.928,0.08,32.4,1515,38617809,678.2,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+289130,Endless Legend,2018-07-01,36883,31055,5828,0.842,0.19,34.6,1619,40920257,1038.1,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+250400,How to Survive,2018-07-01,20577,17038,3539,0.828,0.18,14.5,594,14996225,311.3,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+269210,Hero Siege,2018-07-01,29923,23490,6433,0.785,0.24,26.8,1113,27868125,707.0,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+373420,Divinity: Original Sin - Enhanced Edition,2018-07-01,43748,39023,4725,0.892,0.22,58.4,2354,58910438,1921.4,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+44350,GRID 2,2018-07-01,41599,33945,7654,0.816,0.16,15.4,718,17922810,372.0,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+287390,Metro: Last Light Redux,2018-07-01,26513,23809,2704,0.898,0.24,15.6,633,15739672,399.3,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+241600,Rogue Legacy,2018-07-01,34380,32180,2200,0.936,0.18,19.4,808,19921277,413.5,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+219990,Grim Dawn,2018-07-01,42671,39599,3072,0.928,0.28,64.2,2592,63255186,2888.4,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+307780,Mortal Kombat X,2018-07-01,28194,22330,5864,0.792,0.18,24.6,1054,25570652,834.0,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+335300,DARK SOULS II: Scholar of the First Sin,2018-07-01,45306,38691,6615,0.854,0.29,62.8,2801,67827620,2212.3,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+202170,Sleeping Dogs,2018-07-01,29197,26803,2394,0.918,0.26,22.4,935,22331453,392.2,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+209160,Call of Duty: Ghosts,2018-07-01,34869,20363,14506,0.584,0.14,21.2,974,23130698,480.1,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+582660,Black Desert Online,2018-07-01,22344,16579,5765,0.742,0.12,86.4,3777,88963876,6770.5,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+208650,Batman: Arkham Knight,2018-07-01,26867,22138,4729,0.824,0.24,26.8,1080,25137794,819.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+275850,No Man's Sky,2018-07-01,43860,18772,25088,0.428,0.28,38.4,1609,37461523,1710.6,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+263280,SPINTIRES,2018-07-01,24623,19994,4629,0.812,0.21,22.6,1027,23847222,605.0,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+266840,Age of Mythology: Extended Edition,2018-07-01,48492,43255,5237,0.892,0.19,32.4,1431,32653624,828.4,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+238010,Deus Ex: Human Revolution - Director's Cut,2018-07-01,29609,27181,2428,0.918,0.16,26.4,1228,27802849,577.1,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+394360,Hearts of Iron IV,2018-07-01,44762,41002,3760,0.916,0.28,134.0,5531,124712475,5694.6,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+325610,Total War: ATTILA,2018-07-01,39522,31025,8497,0.785,0.21,62.4,2771,61522621,2006.6,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+237930,Transistor,2018-07-01,29940,28203,1737,0.942,0.24,11.2,518,11478981,291.2,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+322170,Geometry Dash,2018-07-01,28045,26250,1795,0.936,0.15,34.2,1459,32028369,812.5,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+221040,Resident Evil 6 / Biohazard 6,2018-07-01,23595,18782,4813,0.796,0.28,22.4,1050,23059120,478.6,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+239160,Thief,2018-07-01,23925,17657,6268,0.738,0.18,16.8,739,16174905,410.3,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+45760,Ultra Street Fighter IV,2018-07-01,24733,22062,2671,0.892,0.19,36.4,1614,35144560,891.5,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+427730,Who's Your Daddy,2018-07-01,22527,17661,4866,0.784,0.18,8.6,350,7624234,248.7,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+298630,The Escapists,2018-07-01,28727,25969,2758,0.904,0.21,16.4,675,14596161,476.1,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+218680,Scribblenauts Unlimited,2018-07-01,24122,22482,1640,0.932,0.14,11.8,532,11493579,201.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+409710,BioShock Remastered,2018-07-01,23112,17750,5362,0.768,0.21,14.2,663,14247665,650.6,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+242700,Injustice: Gods Among Us Ultimate Edition,2018-07-01,21044,18182,2862,0.864,0.16,15.8,723,15414136,319.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+224760,FEZ,2018-07-01,27828,25824,2004,0.928,0.15,9.4,431,9174863,190.4,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+291650,Pillars of Eternity,2018-07-01,27737,24076,3661,0.868,0.19,48.6,2076,44136365,1439.5,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+236430,DARK SOULS II,2018-07-01,28628,25078,3550,0.876,0.22,58.4,2538,53576011,1359.1,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+552500,Warhammer: Vermintide 2,2018-07-01,35134,27896,7238,0.794,0.24,34.8,1609,33577124,7666.0,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+225260,Brutal Legend,2018-07-01,20701,19128,1573,0.924,0.11,10.6,488,10059710,208.8,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+433340,Slime Rancher,2018-07-01,26201,25363,838,0.968,0.24,26.4,1155,23430639,1783.2,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+3830,Psychonauts,2018-07-01,14566,13954,612,0.958,0.09,11.4,535,10754293,90.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+391720,Layers of Fear,2018-07-01,25085,22928,2157,0.914,0.22,6.8,289,5802537,265.0,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+657200,Hand Simulator,2018-07-01,12229,10175,2054,0.832,0.34,5.4,248,4949967,376.7,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+312530,Duck Game,2018-07-01,23947,22798,1149,0.952,0.18,19.6,872,17203582,561.1,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+524220,NieR:Automata,2018-07-01,31487,26071,5416,0.828,0.44,42.6,1771,34677495,2639.1,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+337000,Deus Ex: Mankind Divided,2018-07-01,33179,24353,8826,0.734,0.21,24.8,1048,20174739,921.2,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+313120,Stranded Deep,2018-07-01,25115,19288,5827,0.768,0.24,21.6,921,17719379,577.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+242860,Verdun,2018-07-01,21336,18434,2902,0.864,0.16,22.4,998,19121323,623.7,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+311690,Enter the Gungeon,2018-07-01,27592,26323,1269,0.954,0.26,42.8,1973,37645209,1719.0,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+440900,Conan Exiles,2018-07-01,28392,20669,7723,0.728,0.28,56.4,2459,46729859,10668.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+39140,FINAL FANTASY VII,2018-07-01,24372,22520,1852,0.924,0.14,38.6,1739,32929329,683.5,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+403640,Dishonored 2,2018-07-01,20071,16900,3171,0.842,0.25,24.2,978,18367651,838.7,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+247080,Crypt of the NecroDancer,2018-07-01,30571,29409,1162,0.962,0.22,21.4,932,17439992,568.8,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+646570,Slay the Spire,2018-07-01,36281,35338,943,0.974,0.38,54.6,2572,48111889,3661.5,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+102600,Orcs Must Die!,2018-07-01,21275,20467,808,0.962,0.18,14.2,588,10830712,164.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+55150,"Warhammer 40,000: Space Marine",2018-07-01,17503,16068,1435,0.918,0.16,15.4,643,11781501,179.3,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+204880,Sins of a Solar Empire: Rebellion,2018-07-01,27466,25488,1978,0.928,0.18,42.8,2004,36470953,640.5,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+206440,To the Moon,2018-07-01,18329,17706,623,0.966,0.34,5.2,220,3987404,60.7,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+241540,State of Decay,2018-07-01,18197,14994,3203,0.824,0.19,22.4,960,17332235,359.7,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+249050,Dungeon of the Endless,2018-07-01,20853,18601,2252,0.892,0.21,18.6,779,14025078,355.8,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+310560,DiRT Rally,2018-07-01,27455,24545,2910,0.894,0.22,26.8,1160,20752849,676.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+225080,Brothers - A Tale of Two Sons,2018-07-01,16090,15253,837,0.948,0.21,4.2,175,3079335,63.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+261030,The Walking Dead: Season 2,2018-07-01,24916,23870,1046,0.958,0.19,11.8,530,9317631,193.4,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+447820,Day of Infamy,2018-07-01,24158,20873,3285,0.864,0.16,18.4,757,13276947,1010.4,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+221640,Super Hexagon,2018-07-01,17629,17065,564,0.968,0.14,6.4,275,4784289,84.0,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+475150,Titan Quest Anniversary Edition,2018-07-01,27674,25349,2325,0.916,0.28,38.4,1686,29274893,1336.8,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+274170,Hotline Miami 2: Wrong Number,2018-07-01,24132,22394,1738,0.928,0.18,14.2,586,10134794,330.6,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+582160,Assassin's Creed Origins,2018-07-01,30938,26235,4703,0.848,0.36,48.5,1962,33701101,2564.8,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+244450,Men of War: Assault Squad 2,2018-07-01,29759,26545,3214,0.892,0.24,52.6,2135,36271125,920.1,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+26800,Braid,2018-07-01,19420,18177,1243,0.936,0.15,6.8,315,5308032,63.8,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+250320,The Wolf Among Us,2018-07-01,19099,18488,611,0.968,0.19,10.4,469,7909907,164.2,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+21690,Resident Evil 5/ Biohazard 5,2018-07-01,23058,19922,3136,0.864,0.24,24.8,1170,19598811,235.5,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+367520,Hollow Knight,2018-07-01,32185,31155,1030,0.968,0.34,42.6,1723,28710156,2184.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+261570,Ori and the Blind Forest,2018-07-01,21656,20876,780,0.964,0.28,14.2,588,9779107,319.0,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+249130,LEGO Marvel Super Heroes,2018-07-01,20695,19577,1118,0.946,0.16,18.4,863,14263844,296.1,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+220440,DmC: Devil May Cry,2018-07-01,16246,15239,1007,0.938,0.26,16.8,696,11462415,237.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+22000,World of Goo,2018-07-01,13337,12643,694,0.948,0.18,7.6,308,5058563,55.0,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+302510,Ryse: Son of Rome,2018-07-01,14877,12824,2053,0.862,0.24,11.4,513,8408704,213.3,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+234630,Project CARS,2018-07-01,16983,13043,3940,0.768,0.18,24.6,1123,18227663,594.5,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+394510,HELLDIVERS,2018-07-01,26049,24069,1980,0.924,0.34,28.4,1158,18762841,612.0,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+367500,Dragon's Dogma: Dark Arisen,2018-07-01,26119,23403,2716,0.896,0.22,46.8,1938,31356044,1431.8,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+349040,NARUTO SHIPPUDEN: Ultimate Ninja STORM 4,2018-07-01,27782,24782,3000,0.892,0.36,24.2,1034,16637139,759.7,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+102500,Kingdoms of Amalur: Reckoning,2018-07-01,22775,20133,2642,0.884,0.16,36.4,1490,23927134,420.2,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+383870,Firewatch,2018-07-01,23890,21071,2819,0.882,0.24,5.4,241,3855664,176.1,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+239070,Hammerwatch,2018-07-01,17956,16196,1760,0.902,0.14,12.6,537,8563304,177.7,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+594570,Total War: WARHAMMER II,2018-07-01,29744,27305,2439,0.918,0.36,94.0,3854,61387512,4671.8,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+624090,Football Manager 2018,2018-07-01,31866,21796,10070,0.684,0.28,186.0,8256,131477055,10005.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+303590,Move or Die,2018-07-01,21803,19797,2006,0.908,0.22,11.4,473,7507948,342.8,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+418460,Rising Storm 2: Vietnam,2018-07-01,20378,17158,3220,0.842,0.16,32.8,1371,21765613,1656.4,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+356190,Middle-earth: Shadow of War,2018-07-01,23178,19609,3569,0.846,0.32,38.4,1699,26966910,2052.3,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+240720,Getting Over It with Bennett Foddy,2018-07-01,19070,15599,3471,0.818,0.42,11.2,485,7665909,583.4,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+236090,Dust: An Elysian Tail,2018-07-01,22131,21201,930,0.958,0.19,13.6,625,9836494,204.2,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+301640,Zombie Army Trilogy,2018-07-01,24939,22046,2893,0.884,0.24,18.2,860,13468694,439.3,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+307690,Sleeping Dogs: Definitive Edition,2018-07-01,23289,21333,1956,0.916,0.34,24.6,1058,16404913,416.2,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+257510,The Talos Principle,2018-07-01,23400,22417,983,0.958,0.21,18.8,764,11819630,299.8,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+313160,Farming Simulator 15,2018-07-01,16422,14977,1445,0.912,0.14,46.2,2042,31187735,791.2,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+374040,Portal Knights,2018-07-01,22058,18440,3618,0.836,0.38,22.4,993,15121710,1150.8,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+239350,Spelunky,2018-07-01,19413,18015,1398,0.928,0.14,28.4,1161,17543324,364.1,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+476600,Call of Duty: WWII,2018-07-01,19029,12217,6812,0.642,0.24,26.8,1197,17783564,1353.4,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+311340,METAL GEAR SOLID V: GROUND ZEROES,2018-07-01,12654,10705,1949,0.846,0.24,9.6,426,6329028,160.6,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+365450,Hacknet,2018-07-01,15782,14804,978,0.938,0.28,11.4,517,7554177,246.4,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+292730,Call of Duty: Infinite Warfare,2018-07-01,21970,13006,8964,0.592,0.22,18.6,782,11332643,517.5,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+434650,Lost Castle,2018-07-01,21857,19496,2361,0.892,0.58,22.8,966,13916892,635.5,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+287450,Rise of Nations: Extended Edition,2018-07-01,20446,18729,1717,0.916,0.18,34.2,1542,22088774,560.3,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+238370,Magicka 2,2018-07-01,13128,10739,2389,0.818,0.19,11.6,518,7405373,241.5,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+339800,HuniePop,2018-07-01,25180,24223,957,0.962,0.16,14.8,631,8995879,293.4,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+360431,Mafia III,2018-07-01,21247,12068,9179,0.568,0.22,26.4,1110,15828614,722.8,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+337020,Town of Salem,2018-07-01,18140,16036,2104,0.884,0.08,38.4,1678,23704157,601.3,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+437220,The Culling,2018-07-01,15697,9167,6530,0.584,0.14,21.2,997,14014722,639.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+322500,SUPERHOT,2018-07-01,17673,15835,1838,0.896,0.24,7.8,325,4557495,208.1,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+341800,Keep Talking and Nobody Explodes,2018-07-01,17895,17394,501,0.972,0.18,8.4,342,4759678,155.2,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+588650,Dead Cells,2018-07-01,28628,27540,1088,0.962,0.38,36.4,1497,20807902,1583.6,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+379430,Kingdom Come: Deliverance,2018-07-01,26687,20923,5764,0.784,0.26,54.8,2220,30641892,6995.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+244210,Assetto Corsa,2018-07-01,18890,17228,1662,0.912,0.21,48.6,2220,30578577,775.7,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+323470,DRAGON BALL XENOVERSE,2018-07-01,20874,18035,2839,0.864,0.22,28.4,1180,16223339,529.1,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+518790,theHunter: Call of the Wild,2018-07-01,19427,16358,3069,0.842,0.28,38.6,1615,21940751,1669.8,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+648800,Raft,2018-07-01,25252,22626,2626,0.896,0.29,26.4,1077,14557519,3323.6,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+367450,Poly Bridge,2018-07-01,16479,15029,1450,0.912,0.26,12.4,538,7234705,330.4,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+284160,BeamNG.drive,2018-07-01,21530,20367,1163,0.946,0.18,44.2,1802,24152148,787.7,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+447020,Farming Simulator 17,2018-07-01,17553,16219,1334,0.924,0.19,58.4,2578,34223141,1562.7,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+466560,Northgard,2018-07-01,22621,19997,2624,0.884,0.31,28.6,1169,15336229,1167.1,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+386940,Ultimate Chicken Horse,2018-07-01,22552,21515,1037,0.954,0.32,16.4,737,9469898,432.4,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+294860,Valkyria Chronicles,2018-07-01,15297,14043,1254,0.918,0.19,24.8,1021,13062693,331.4,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+387290,Ori and the Blind Forest: Definitive Edition,2018-07-01,21702,21008,694,0.968,0.32,16.2,674,8596315,392.5,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+226840,Age of Wonders III,2018-07-01,12809,10478,2331,0.818,0.16,34.8,1504,19153833,485.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+70300,VVVVVV,2018-07-01,11354,10923,431,0.962,0.11,5.4,242,3078665,41.3,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+207170,Legend of Grimrock,2018-07-01,17474,16391,1083,0.938,0.14,16.8,777,9871776,173.4,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+644930,They Are Billions,2018-07-01,20829,18080,2749,0.868,0.42,46.2,1868,23514205,1789.5,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+392110,Endless Space 2,2018-07-01,18627,15572,3055,0.836,0.26,38.4,1763,22060610,1678.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+237990,The Banner Saga,2018-07-01,14359,12981,1378,0.904,0.18,14.6,616,7676721,194.7,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+228280,Baldur's Gate: Enhanced Edition,2018-07-01,17363,15766,1597,0.908,0.16,42.4,1985,24661030,511.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+214340,Deponia,2018-07-01,10397,9191,1206,0.884,0.15,8.6,349,4329986,76.0,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+265300,Lords Of The Fallen,2018-07-01,15781,9658,6123,0.612,0.19,18.4,809,10010199,253.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+304650,SUNLESS SEA,2018-07-01,14783,12181,2602,0.824,0.16,24.2,1110,13701411,446.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+268050,The Evil Within,2018-07-01,13789,11610,2179,0.842,0.28,18.6,780,9626260,244.2,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+244160,Homeworld Remastered Collection,2018-07-01,12831,11368,1463,0.886,0.21,22.8,977,11849705,386.5,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+622650,Bendy and the Ink Machine,2018-07-01,14840,13237,1603,0.892,0.18,8.4,380,4570403,347.8,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+405820,Sniper Elite 4,2018-07-01,17331,15667,1664,0.904,0.26,22.4,932,11114496,845.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+292120,FINAL FANTASY XIII,2018-07-01,13021,9662,3359,0.742,0.24,34.6,1473,17379313,440.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+254700,resident evil 4 / biohazard 4,2018-07-01,13717,12565,1152,0.916,0.28,22.8,960,11284892,286.3,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+480490,Prey,2018-07-01,20121,18149,1972,0.902,0.26,26.4,1155,13551150,1031.3,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+206190,Gunpoint,2018-07-01,11131,10775,356,0.968,0.16,5.8,243,2848990,59.1,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+246900,Viscera Cleanup Detail,2018-07-01,15157,14126,1031,0.932,0.21,14.2,591,6908026,225.3,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+235460,METAL GEAR RISING: REVENGEANCE,2018-07-01,15340,14542,798,0.948,0.32,16.4,739,8512063,215.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+323190,Frostpunk,2018-07-01,18597,16663,1934,0.896,0.44,24.8,1021,11555790,2638.3,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+264200,One Finger Death Punch,2018-07-01,13401,12919,482,0.964,0.19,8.6,392,4396335,111.5,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+304430,INSIDE,2018-07-01,14827,14204,623,0.958,0.28,5.2,236,2638326,120.5,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+418370,RESIDENT EVIL 7 biohazard / BIOHAZARD 7 resident evil,2018-07-01,19600,18189,1411,0.928,0.34,16.8,733,8167827,621.6,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+438740,Friday the 13th: The Game,2018-07-01,13073,9465,3608,0.724,0.26,28.4,1263,13258355,1009.0,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+240760,Wasteland 2: Director's Cut,2018-07-01,14902,12607,2295,0.846,0.18,42.6,1831,19123106,485.1,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+266510,Hand of Fate,2018-07-01,13198,12037,1161,0.912,0.24,14.8,686,7144407,233.0,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+40700,Machinarium,2018-07-01,8063,7724,339,0.958,0.28,6.4,261,2648745,31.8,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+350080,Wolfenstein: The Old Blood,2018-07-01,10236,9131,1105,0.892,0.21,9.8,419,4195281,136.8,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+448510,Overcooked,2018-07-01,18411,16864,1547,0.916,0.36,12.4,504,5039817,230.1,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+362890,Black Mesa,2018-07-01,14535,13779,756,0.948,0.19,16.2,750,7445581,242.8,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+257850,Hyper Light Drifter,2018-07-01,15949,15024,925,0.942,0.24,13.6,620,6148648,280.8,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+330830,Tales from the Borderlands,2018-07-01,12230,11716,514,0.958,0.18,11.4,481,4749681,120.5,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+200900,Cave Story+,2018-07-01,11946,11301,645,0.946,0.16,9.8,413,4064947,61.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+250760,Shovel Knight: Treasure Trove,2018-07-01,12277,11835,442,0.964,0.18,16.4,731,7110137,180.4,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+224480,Octodad: Dadliest Catch,2018-07-01,11460,10681,779,0.932,0.16,4.8,200,1936475,49.1,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+368620,60 Seconds!,2018-07-01,10504,9370,1134,0.892,0.28,11.2,499,4814597,157.0,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+384190,ABZU,2018-07-01,10170,9519,651,0.936,0.26,4.2,193,1856723,84.8,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+359550,FINAL FANTASY X/X-2 HD Remaster,2018-07-01,16196,14706,1490,0.908,0.28,48.6,2043,19378784,884.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+290340,Armello,2018-07-01,13974,11515,2459,0.824,0.26,18.4,805,7588498,247.5,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+569480,Kingdoms and Castles,2018-07-01,8314,7449,865,0.896,0.24,14.6,604,5679420,432.2,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+362960,Tyranny,2018-07-01,13836,11954,1882,0.864,0.21,32.8,1458,13674404,624.4,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+318600,The Flame in the Flood,2018-07-01,12488,9803,2685,0.785,0.22,11.4,461,4316032,197.1,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+388410,Darksiders II Deathinitive Edition,2018-07-01,12885,10256,2629,0.796,0.21,24.6,1036,9666095,315.3,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+612880,Wolfenstein II: The New Colossus,2018-07-01,11407,8943,2464,0.784,0.26,16.4,705,6457908,491.5,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+248610,Door Kickers,2018-07-01,11576,10951,625,0.946,0.22,16.8,717,6560536,166.4,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+287980,Mini Metro,2018-07-01,11850,11400,450,0.962,0.34,11.4,466,4256764,138.8,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+389730,TEKKEN 7,2018-07-01,13132,10873,2259,0.828,0.28,48.6,2119,19112444,1454.5,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+394310,Punch Club,2018-07-01,8071,6602,1469,0.818,0.26,12.8,537,4845354,221.2,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+232430,Gone Home,2018-07-01,7423,5745,1678,0.774,0.14,3.2,134,1199555,24.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+454650,DRAGON BALL XENOVERSE 2,2018-07-01,11353,9695,1658,0.854,0.26,36.8,1548,13806314,630.4,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+234650,Shadowrun: Dragonfall - Director's Cut,2018-07-01,12495,11345,1150,0.908,0.16,24.2,1006,8899860,225.8,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+316790,Grim Fandango Remastered,2018-07-01,8246,7553,693,0.916,0.12,9.6,408,3508479,114.4,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+233290,Murdered: Soul Suspect,2018-07-01,11314,9707,1607,0.858,0.21,10.4,427,3663662,92.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+248390,Craft The World,2018-07-01,9494,8469,1025,0.892,0.32,34.6,1402,11909903,302.1,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+496300,Kingdom: New Lands,2018-07-01,12901,11559,1342,0.896,0.28,18.4,852,7232883,330.3,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+271240,Offworld Trading Company,2018-07-01,12956,10520,2436,0.812,0.19,16.8,722,6012378,274.5,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+474750,Reigns,2018-07-01,8420,7696,724,0.914,0.28,5.6,234,1934859,88.3,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+210970,The Witness,2018-07-01,10443,8960,1483,0.858,0.26,22.4,909,7485326,341.8,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+242680,Nuclear Throne,2018-07-01,12506,11981,525,0.958,0.16,28.6,1281,10525876,343.3,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+282140,SOMA,2018-07-01,10731,10237,494,0.954,0.22,11.4,510,4172264,136.1,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+285920,TerraTech,2018-07-01,9657,8653,1004,0.896,0.24,28.4,1185,9673564,315.5,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+637650,FINAL FANTASY XV WINDOWS EDITION,2018-07-01,15296,12512,2784,0.818,0.38,56.4,2648,21623733,4936.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+641990,The Escapists 2,2018-07-01,11569,10366,1203,0.896,0.32,18.6,879,7163723,545.2,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+648350,Jurassic World Evolution,2018-07-01,10870,8533,2337,0.785,0.34,28.4,1214,9738345,2223.4,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+554620,Life is Strange: Before the Storm,2018-07-01,10633,9974,659,0.938,0.26,11.2,463,3609569,274.7,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+361420,Turmoil,2018-07-01,7559,6939,620,0.918,0.34,12.6,589,4442096,202.8,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+678950,DRAGON BALL FighterZ,2018-07-01,11050,9304,1746,0.842,0.26,34.8,1587,11767931,2686.7,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+553640,ICEY,2018-07-01,8481,7870,611,0.928,0.74,6.8,308,2249204,102.7,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+460790,Bayonetta,2018-07-01,10596,9791,805,0.924,0.28,16.4,702,4973290,378.5,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+414340,Hellblade: Senua's Sacrifice,2018-07-01,10352,9482,870,0.916,0.24,9.2,394,2774514,211.2,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+516750,My Summer Car,2018-07-01,10677,10015,662,0.938,0.14,38.4,1713,11894092,543.1,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+418240,Shadow Tactics: Blades of the Shogun,2018-07-01,11634,11192,442,0.962,0.36,26.8,1173,7937041,362.4,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+283640,Salt and Sanctuary,2018-07-01,12139,11022,1117,0.908,0.32,28.4,1194,7970174,363.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+243970,"Invisible, Inc.",2018-07-01,6860,6339,521,0.924,0.24,18.6,764,5013967,163.5,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+414700,Outlast 2,2018-07-01,6807,5881,926,0.864,0.32,8.8,359,2323203,176.8,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+258520,The Vanishing of Ethan Carter,2018-07-01,6295,5615,680,0.892,0.18,5.2,228,1441061,36.6,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+443810,This Is the Police,2018-07-01,8313,7000,1313,0.842,0.28,18.4,760,4768211,217.7,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+512900,Streets of Rogue,2018-07-01,12360,11841,519,0.958,0.26,21.4,957,5919983,450.5,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+397950,Clustertruck,2018-07-01,9410,8638,772,0.918,0.22,7.8,315,1934366,88.3,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+356570,Party Hard,2018-07-01,8065,7226,839,0.896,0.24,9.6,403,2471105,80.6,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+252410,SteamWorld Dig,2018-07-01,8541,8046,495,0.942,0.18,7.4,311,1905017,39.5,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+403190,Planetbase,2018-07-01,8964,7745,1219,0.864,0.28,22.4,1048,6306526,205.7,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+613100,House Flipper,2018-07-01,8267,7093,1174,0.858,0.34,21.6,876,5131561,1171.6,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+570940,DARK SOULS: REMASTERED,2018-07-01,7649,5568,2081,0.728,0.36,44.2,1866,10851662,2477.5,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+485510,Nioh: Complete Edition,2018-07-01,12221,9728,2493,0.796,0.42,58.6,2400,13911973,1058.7,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+446800,Transport Fever,2018-07-01,8348,7079,1269,0.848,0.24,48.2,2022,11387718,520.0,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+405640,Pony Island,2018-07-01,7340,7032,308,0.958,0.22,3.6,150,835944,38.2,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+415200,Motorsport Manager,2018-07-01,7753,7040,713,0.908,0.24,52.4,2473,13606046,621.3,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+288160,The Room,2018-07-01,5777,5627,150,0.974,0.34,3.8,161,879824,22.3,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+488790,South Park: The Fractured But Whole,2018-07-01,10662,8722,1940,0.818,0.22,22.6,966,5152224,392.1,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+675010,Spintires: MudRunner,2018-07-01,8074,7202,872,0.892,0.26,28.4,1192,6339542,482.5,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+368340,Her Story,2018-07-01,3883,3510,373,0.904,0.18,3.8,178,909031,29.6,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+335670,LISA,2018-07-01,6124,5842,282,0.954,0.16,14.8,695,3453220,87.6,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+447530,VA-11 Hall-A: Cyberpunk Bartender Action,2018-07-01,6815,6651,164,0.976,0.42,13.6,615,2977831,136.0,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+396750,EVERSPACE,2018-07-01,5191,4215,976,0.812,0.24,22.8,1018,4927333,375.0,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+637090,BATTLETECH,2018-07-01,8299,6506,1793,0.784,0.21,46.4,2155,10401323,2374.7,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+280890,Aragami,2018-07-01,5736,5185,551,0.904,0.28,11.4,491,2352621,107.4,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+360740,Downwell,2018-07-01,5204,5006,198,0.962,0.19,8.2,371,1776062,57.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+527230,For The King,2018-07-01,9455,8283,1172,0.876,0.38,26.8,1157,5510585,1258.1,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+429660,Tales of Berseria,2018-07-01,9913,9199,714,0.928,0.28,46.2,2009,9524868,724.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+388880,Oxenfree,2018-07-01,5152,4802,350,0.932,0.22,6.4,268,1253964,57.3,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+424840,Little Nightmares,2018-07-01,8246,7652,594,0.928,0.34,6.8,306,1431491,108.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+346900,Shadowrun: Hong Kong - Extended Edition,2018-07-01,5770,5055,715,0.876,0.16,24.6,1138,5090117,166.0,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+378860,Project CARS 2,2018-07-01,5951,4713,1238,0.792,0.22,32.4,1452,6412046,488.0,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+545690,Wizard of Legend,2018-07-01,6621,6065,556,0.916,0.36,16.8,784,3417587,780.3,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+251730,Legend of Grimrock 2,2018-07-01,7333,6732,601,0.918,0.14,21.4,904,3924293,99.6,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+411300,ELEX,2018-07-01,7678,5590,2088,0.728,0.16,38.6,1667,7068664,538.0,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+251150,The Legend of Heroes: Trails in the Sky,2018-07-01,6211,5876,335,0.946,0.28,44.8,2084,8826689,223.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+115800,Owlboy,2018-07-01,6880,6082,798,0.884,0.21,10.6,459,1924724,87.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+666140,My Time At Portia,2018-07-01,6031,5536,495,0.918,0.56,48.2,1971,8192177,1870.4,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+428550,Momodora: Reverie Under The Moonlight,2018-07-01,5388,5129,259,0.952,0.34,8.6,401,1651248,75.4,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+423580,Project Highrise,2018-07-01,5112,4304,808,0.842,0.26,22.4,939,3858463,176.2,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+573170,Detention,2018-07-01,5756,5572,184,0.968,0.68,4.8,202,823442,62.7,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
+240570,Crawl,2018-07-01,6755,6512,243,0.964,0.18,9.2,382,1536720,116.9,https://api.steampowered.com/IUserReviewsService/GetAppReviews/v1/
