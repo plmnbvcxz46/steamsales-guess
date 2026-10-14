@@ -178,8 +178,18 @@ CREATE TABLE dwd_steam_game_aligned (
     log_price DECIMAL(10,4) NOT NULL,
     data_cohort VARCHAR(30) NOT NULL,
     snapshot_or_report_date DATE NOT NULL,
-    source_url VARCHAR(500)
-) ENGINE=InnoDB COMMENT='明细层：清洗对齐后的买断制游戏分析宽表';
+    source_url VARCHAR(500),
+    steam_purchase_ratio DECIMAL(8,4) DEFAULT 0.8500,
+    max_discount_pct INT DEFAULT 50,
+    achievement_first_rate DECIMAL(8,4) DEFAULT 0.8200,
+    launch_30d_review_share DECIMAL(8,4) DEFAULT 0.4500,
+    peak_ccu INT DEFAULT 1000,
+    has_preorder TINYINT(1) DEFAULT 0,
+    ccu_tail_ratio DECIMAL(8,4) DEFAULT 1.5000,
+    steam_followers INT DEFAULT 5000,
+    top_seller_weeks INT DEFAULT 0,
+    audience_cluster_idx DECIMAL(8,4) DEFAULT 0.0000
+) ENGINE=InnoDB COMMENT='明细层：清洗对齐后的买断制游戏分析宽表（含H1~H6全维度特征）';
 
 DROP TABLE IF EXISTS fact_sales_estimation;
 CREATE TABLE fact_sales_estimation (
@@ -254,3 +264,16 @@ CREATE TABLE ads_feature_importance (
     m4_gbdt_importance_pct DECIMAL(8,2),
     direction_desc VARCHAR(255)
 ) ENGINE=InnoDB COMMENT='结果层：M2回归系数与M4树模型特征重要性汇总表';
+
+DROP TABLE IF EXISTS ads_hypothesis_ablation;
+CREATE TABLE ads_hypothesis_ablation (
+    step_code VARCHAR(40) PRIMARY KEY,
+    step_name VARCHAR(120) NOT NULL,
+    mape_pct DECIMAL(8,2) NOT NULL,
+    mdape_pct DECIMAL(8,2) NOT NULL,
+    r2_log DECIMAL(8,4) NOT NULL,
+    hit_rate_10pct DECIMAL(8,2) NOT NULL,
+    hit_rate_30pct DECIMAL(8,2) NOT NULL,
+    hit_rate_50pct DECIMAL(8,2) NOT NULL,
+    mechanism_desc VARCHAR(255)
+) ENGINE=InnoDB COMMENT='结果层：6大科学假设(H1~H6)逐步消融实验统计汇总表';

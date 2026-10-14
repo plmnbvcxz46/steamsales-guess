@@ -303,7 +303,7 @@ def generate_all_figures():
     fig, axes = plt.subplots(1, 2, figsize=(14.5, 5.8), dpi=180)
     ax1, ax2 = axes
 
-    mod_eval = df_eval[df_eval["eval_cohort"] == "Modern_2020_Test (N=32)"].set_index("method_code")
+    mod_eval = df_eval[df_eval["eval_cohort"].str.startswith("Modern_2020")].set_index("method_code")
     gam_eval = df_eval[df_eval["eval_cohort"] == "Gamalytic_Benchmark (N=120)"].set_index("method_code")
 
     compare_labels = [
