@@ -1,124 +1,121 @@
 # 基于 ETL 的 Steam 游戏销量估算与智能分析系统 (steamsales-guess)
 
-> **课程**：高级数据库技术与应用 · 课程大作业  
-> **仓库地址**：`https://github.com/plmnbvcxz46/steamsales-guess`  
-> **核心问题**：Steam 官方从不公开单款游戏的具体销量，如何利用公开可采集的多源异构数据（评测数、商店价格、好评率、历史在线人数与人均游玩时长），构建一套工程化的 ETL 数据仓库与多信号融合估算系统，回答“某款游戏在 Steam 上到底卖了多少份”？
+> 课程：高级数据库技术与应用 · 大作业
+> 核心问题：Steam 从不公布单款游戏的销量。只用公开可采集的数据（评测、价格、在线人数），一款游戏在 Steam 上到底卖了多少份？
+
+**全部数据为真实采集**：模型输入来自 Steam 官方接口和 SteamCharts，真值来自 2018 年 Ars Technica 公开的泄露数据与有出处的公开销量。没有模拟数据，也没有由真值反推出来的特征。
 
 ---
 
-## 一、项目亮点与核心特色
+## 一、结果一览
 
-1. **规范的三层数据仓库与星型模型设计**：
-   - 采用 **原始层 (ODS) → 明细与维度层 (DWD/DIM) → 结果与事实层 (FACT/ADS)** 三层架构，共设计 13 张核心表与 6 个只读分析视图。
-   - 星型模型专门引入 **估算方法维度表 (`dim_estimation_method`)**，事实表 `fact_sales_estimation` 按“每款游戏 × 每种估算方法一行”存储（含 80% 预测区间上下限），支持在 FineBI 大屏中通过单个切片器实现整屏图表联动切换。
-2. **完整的工业级 ETL 机制（Python + Kettle 双实现）**：
-   - **数据清洗与异常审计**：自动识别并拦截免费游戏 (`FREE_GAME`)、非游戏工具软件 (`NON_GAME_SOFTWARE`)、试玩版 (`DEMO_VERSION`)、负价格 (`INVALID_PRICE`) 与零评测记录 (`ZERO_REVIEWS`)，所有拦截明细写入 `etl_clean_error_log`。
-   - **断点续传 (`etl_checkpoint`)** 与 **运行日志 (`etl_job_log`)**：记录批处理最后的 `last_processed_appid` 与增量水位线时间戳 `last_update_time`，支持异常中断后无缝续传。
-   - **缓慢变化维 SCD Type 2 (`dim_price_scd2`)**：针对游戏打折促销与永久调价事件，自动闭合旧价格版本 (`effective_end`, `is_current=0`) 并插入新版本 (`version_no+1`)，完整保留历史价格轨迹。
-   - **Kettle (PDI) 转换与作业**：提供标准 `.ktr` 与 `.kjb` 文件（`clean_steam_games.ktr`、`scd2_price_history.ktr`、`steam_etl_main.kjb`）。
-3. **深入的 SQL 技术落地**：
-   - 使用 SQL `CASE WHEN` 视图直接实现 **M0（固定倍数 30）** 与 **M1（按年份分段文献经验系数）**。
-   - 针对 MySQL/SQLite 无内置中位数函数的问题，使用 **SQL 窗口函数 (`ROW_NUMBER() OVER` + `COUNT(*) OVER`)** 精确求解各年份、各类型、各价格档的实测 $k$ 中位数。
-   - 在核心关联与过滤字段建立复合索引 `idx_fact_cohort_method`，通过 `EXPLAIN` 验证将全表扫描优化为索引查找，多表聚合查询提速 **1.72 倍**。
-4. **从单一评测信号到双信号融合的完整建模链路**：
-   - 实证揭示 **2019 年 10 月 Steam 上线“游玩后弹窗提示写评测”引发的 $k$ 值断崖减半**，以及控制价格混杂效应后 **好评率与 $k$ 的“倒 U 形”二次曲线关系**。
-   - 对比 M0、M1、M2（多元对数线性回归）、M3（分位数回归区间估计）、M4（随机森林与梯度提升树 GBDT），证明单一评测信号在近年真值集上的 $\pm 30\%$ 命中率上限约为 **62.50%**。
-   - 引入不受评测政策影响的 **信号 B（SteamCharts 累计游玩总小时数 ÷ 校准后人均游玩时长）** 并与信号 A 进行对数空间加权融合（`Fusion_AB`），使近年真值集的 $\pm 30\%$ 命中率跃升至 **81.25%**（MAPE 降至 **17.21%**），跨时代检验集命中率达 **87.50%**，全面对标商业分析机构 Gamalytic (76.92%)。
+| 测试集 | 方法 | ±30% 命中率 | 说明 |
+|---|---|---|---|
+| 2018 训练集 1,795 款（真值 = 泄露玩家数） | M0 固定 30 倍 | 9.7% | 五折交叉验证 |
+| | M4 树模型 | 53.7% | |
+| 真值集 107 款（真值 = 公开销量） | M0 固定 30 倍 | 31.8% | |
+| | M1 按年份文献 k | 40.2% | |
+| | M4 树模型 + 近年校准 | 45.8% | 校准系数留一法 |
+| | 融合 A+B | 47.7% | 嵌套留一法 |
+| 真值集中信号 B 可用的 68 款 | 信号 B（在线 × 时长） | 52.9% | |
+| | 融合 A+B | **54.4%**（±50% 内 75.0%） | |
+| 对照：同一批 107 款 | Gamalytic 自己的估算 | 73.8% | 来自 Gamalytic 测试表 |
+| 对照：Gamalytic 原文（约 120 款） | 评测 × 固定 / 修正倍数 | 42.7% / 50.4% | 原文只公布了这一列 |
+
+几条主要发现：
+1. **"游玩后提示写评测"是 2019 年 11 月上线的。** 这是从 40 款老游戏的月度评测量测出来的：此后月新增评测持续是之前的 3.5 倍（`fig04`）。在近年真值上独立校准出的政策系数，折算成 k 的倍数是 0.503，和"k 减半"的说法一致。
+2. **2018 年的"玩家数"和近年的"销量"不是同一个口径。** 直接把 2018 年模型迁移过去，残差会随游戏年龄、Steam 内购买评测占比系统性变化，所以这些系数必须用近年真值重估（设计文档 3.6 节的第二种情况）。
+3. **只靠评测这一路信号，命中率大约 40%~46%**，与 Gamalytic 公布的同类方法一致；加入在线人数信号后提升到 50% 以上。和 Gamalytic 仍有差距，主要因为对方还有"抽样公开玩家资料"这一路信号，我们拿不到。
 
 ---
 
-## 二、项目目录结构
+## 二、目录
 
 ```text
 steamsales-guess/
-├── README.md                          # 项目说明、运行步骤、数据来源与合规声明
-├── 开发日志.md                         # 全程真实维护的开发过程、踩坑排障与方案取舍记录
-├── FineBI_制作步骤.md                  # FineBI 可视化大屏的视图绑定、字段拖拽与联动配置指南
-├── 课程报告.md                         # 完整 7 章课程大作业报告（含 Mermaid 架构图/流向图/ER图）
-├── 最终总结.md                         # 交付清单总结与后续手动操作（Git 推送、FineBI 截图）说明
-├── data/
-│   ├── steam_sales_dw.db              # 已跑通全流程的 SQLite 数据仓库文件（含全部表与6个视图）
-│   ├── raw/                           # 原始层数据
-│   │   ├── games_achievements_players_2018-07-01.csv   # 2018-07-01 Ars Technica 成就泄露快照
-│   │   ├── steam_appdetails_2018_aligned.json          # 商店元数据原始 JSON
-│   │   ├── steam_reviews_2018_aligned.csv              # 截至 2018-07-01 对齐的评测与时长统计
-│   │   ├── recent_sales_truth_2020_2025.csv            # 2020+ 近年公开销量真值集与跨时代检验集
-│   │   └── recent_news_extraction_audit.csv            # 官方新闻大模型结构化抽取与人工核对清单
-│   ├── simulated/                     # 单独存放、明确标注的 ETL 机制演示模拟数据（不参与建模）
-│   │   ├── sim_price_changes.csv                       # 用于演示 SCD Type 2 调价拉链的模拟事件
-│   │   └── sim_daily_increments.csv                    # 用于演示增量水位线抽取的 14 天快照
-│   └── cleaned/                       # 导出的清洗结果、FineBI 只读视图 CSV 与 EXPLAIN 对比报告
+├── run_all.py                    # 一条命令重跑离线部分：ETL -> 建模 -> 作图 -> 转储 -> 测试
 ├── src/
-│   ├── crawler.py                     # Steam 多源采集模块（支持限速、429 指数退避、本地缓存与断点续传）
-│   ├── prototype_explore.py           # 原型验证脚本（对齐 2018 数据，算实测 k，生成图1与图2）
-│   ├── etl_pipeline.py                # 核心 Python ETL 管道（ODS->DWD/DIM、断点续传、SCD2、增量抽取）
-│   ├── models.py                      # 多信号建模脚本（M0~M4、年代校准、信号B、双信号融合、跨时代检验）
-│   └── visualize_all.py               # 统计分析与架构图绘制脚本（生成 fig03 ~ fig10 高清中文图）
+│   ├── crawler.py                # 采集：appdetails、评测(input_json)、SteamCharts、公告；缓存 + 检查点续传
+│   ├── detect_policy_change.py   # 用 40 款老游戏的月度评测量判定评测提示政策的上线月份
+│   ├── price_history_wayback.py  # 从互联网档案馆存档提取历史价格（SCD2 用）
+│   ├── snapshot_collector.py     # 每小时快照：在线人数、评测数、价格（增量抽取用）
+│   ├── prototype_explore.py      # 原型：200 款游戏，k 的分布与对数散点
+│   ├── etl_pipeline.py           # ETL：原始层 -> 明细层/维度 -> 结果层，分批事务 + 检查点、SCD2、增量快照
+│   ├── models.py                 # M0~M4、信号 B、融合；交叉验证 / 留一法；索引 EXPLAIN 对比
+│   ├── news_extract_audit.py     # 官方公告销量句子：抽取、规则对照、与真值交叉核对、人工核对清单
+│   ├── visualize_all.py          # 报告用统计图 fig03~fig10
+│   ├── plot_style.py             # 作图公共样式
+│   └── export_mysql_dump.py      # SQLite -> MySQL INSERT 脚本
 ├── sql/
-│   ├── 01_schema_mysql.sql            # MySQL 8.0 三层架构与星型模型建表 DDL 脚本
-│   ├── 02_views_and_models_mysql.sql  # SQL 实现 M0/M1、窗口函数求 k 中位数及 6 个 FineBI 视图
-│   ├── 03_index_explain_mysql.sql     # 复合索引创建与 EXPLAIN 性能对比脚本
-│   └── 04_full_data_dump_mysql.sql    # 全量结果数据 INSERT 转储脚本（可一键导入本地 MySQL）
-├── kettle/
-│   ├── clean_steam_games.ktr          # Kettle 清洗转换：过滤免费/异常记录并计算实测 k
-│   ├── scd2_price_history.ktr         # Kettle SCD Type 2 转换：使用维度查询/更新维护价格拉链表
-│   └── steam_etl_main.kjb             # Kettle 主控作业：串联清洗转换、SCD2 转换与 SQL 视图刷新
-├── figures/                           # Python 生成的全套 10 张 180 DPI 高清中文统计与架构图
-└── tests/
-    └── test_etl_and_models.py         # 单元测试与集成测试套件（验证清洗、SCD2、窗口中位数与模型指标）
+│   ├── 01_schema_mysql.sql       # 建表（原始层 7 张、维度 5 张、明细 1 张、结果 6 张、运维 3 张、Kettle 输出 2 张）
+│   ├── 02_views_and_models_mysql.sql  # M0/M1、窗口函数中位数、8 个 FineBI 视图（SQLite 和 MySQL 通用）
+│   ├── 03_index_explain_mysql.sql     # 复合索引与 EXPLAIN
+│   └── 04_full_data_dump_mysql.sql    # 全量数据（由 export_mysql_dump.py 生成）
+├── kettle/                       # clean_steam_games.ktr、scd2_price_history.ktr、steam_etl_main.kjb
+├── data/
+│   ├── raw/                      # 采集结果（见第四节）
+│   │   └── source/               # 两份原始外部文件：Ars 泄露表原件、Gamalytic 测试表转录件
+│   ├── cleaned/                  # 视图与结果表导出的 CSV、EXPLAIN 报告、公告抽取审核表
+│   ├── cache/                    # 采集缓存（不入库，只保留 crawl_log.csv 与检查点）
+│   └── steam_sales_dw.db         # SQLite 数据仓库
+├── figures/                      # fig01~fig10
+├── tests/test_etl_and_models.py  # 9 项测试（含"不泄露"测试）
+├── 课程报告.md / 开发日志.md / FineBI_制作步骤.md / 最终总结.md
 ```
 
 ---
 
-## 三、快速运行步骤
+## 三、运行
 
-### 1. 运行 Python 原型探索、ETL 管道、多信号建模与自动化测试
-本项目仅依赖标准科学计算库（`numpy`、`pandas`、`scipy`、`matplotlib`、`requests`）与 Python 内置 `sqlite3`，无需额外配置复杂深度学习环境：
+依赖：Python 3.10+，`numpy pandas scipy matplotlib requests`（`pip install numpy pandas scipy matplotlib requests`）。不需要 sklearn，树模型是手写的。
 
+### 1. 只重跑离线部分（推荐，不联网，1 分钟左右）
 ```bash
-# 1. 运行原型阶段探索（输出 prototype_2018_k_summary.csv 及 fig01、fig02）
-python3 src/prototype_explore.py
-
-# 2. 运行完整 ETL 管道（构建三层表结构、断点续传清洗、SCD2 价格拉链、增量快照与 SQL 视图）
-python3 src/etl_pipeline.py
-
-# 3. 运行 M0~M4 + 信号 B + 双信号融合建模（写回事实表并执行 EXPLAIN 索引对比）
-python3 src/models.py
-
-# 4. 生成全套 10 张中文统计图表（输出至 figures/ 目录）
-python3 src/visualize_all.py
-
-# 5. 运行自动化单元与集成测试套件
-python3 tests/test_etl_and_models.py
+python run_all.py --fresh
 ```
 
-### 2. 导入本地 MySQL 8.0 数据库（供 FineBI 与 Kettle 连接）
-如果本机安装了 MySQL 8.0，只需依次运行 `sql/` 目录下的四个脚本，即可完整复现所有表、数据、索引和视图：
+### 2. 从头重新采集（联网，单进程约 5 小时，可多开进程分片）
+```bash
+python src/crawler.py policy_scan                 # 40 款老游戏的月度评测（约 10 分钟）
+python src/detect_policy_change.py                # 判定政策月份 -> data/raw/policy_change_detected.json
+python src/crawler.py train2018 --shard 0/2       # 2018 训练集第一轮（玩家数 >= 2 万），可开两个进程 0/2、1/2
+python src/crawler.py train2018 --extend          # 扩展轮（玩家数 5000~2 万），可再开一个 --reverse 从另一头抓
+python src/crawler.py truth                       # 118 条公开销量对应的评测（截到公布日）
+python src/crawler.py first_review                # 抢先体验游戏补查第一条评测日期
+python src/crawler.py news_scan                   # 官方公告里的销量句子
+python src/crawler.py export                      # 缓存 -> data/raw/*.csv
+python src/price_history_wayback.py               # 档案馆价格（档案馆较慢，可多次运行，靠缓存续跑）
+python src/snapshot_collector.py --rounds 3       # 每小时快照，可用 Windows 任务计划程序定期运行
+python run_all.py
+```
+中途断掉直接重跑同一条命令即可，已完成的请求会从缓存读取。
 
+### 3. 导入 MySQL 8.0（给 FineBI 和 Kettle 用）
 ```bash
 mysql -u root -p < sql/01_schema_mysql.sql
 mysql -u root -p steam_sales_dw < sql/04_full_data_dump_mysql.sql
 mysql -u root -p steam_sales_dw < sql/02_views_and_models_mysql.sql
 mysql -u root -p steam_sales_dw < sql/03_index_explain_mysql.sql
 ```
+这四个脚本已在 MariaDB 10.11 上完整执行过一遍，8 个视图的行数、k 中位数与 SQLite 版逐行一致。
 
-### 3. 运行 Kettle (Pentaho Data Integration) 转换与作业
-1. 下载并解压 Pentaho Data Integration (Kettle 9.2+)，确保本机已安装 Java 8/11 及 MySQL JDBC 驱动（`mysql-connector-j.jar` 放入 `data-integration/lib/`）。
-2. 启动图形界面 Spoon（Windows 运行 `Spoon.bat`，Linux/macOS 运行 `spoon.sh`），直接打开 `kettle/steam_etl_main.kjb` 或 `kettle/clean_steam_games.ktr`、`kettle/scd2_price_history.ktr`，修改数据库连接 `Steam_MySQL_DW` 的本地密码后点击运行并截图。
-3. 也可通过命令行无头模式运行转换：
-   ```bash
-   pan.sh -file=kettle/clean_steam_games.ktr -level=Basic
-   kitchen.sh -file=kettle/steam_etl_main.kjb -level=Basic
-   ```
+### 4. Kettle
+用 Spoon（PDI 9.x）打开 `kettle/steam_etl_main.kjb`，在数据库连接 `Steam_MySQL_DW` 里填本机 MySQL 密码后运行。需要把 `mysql-connector-j.jar` 放进 `data-integration/lib/`。
+**注意：开发环境里没有装 Kettle，这三个文件只校验过 XML 格式，没有在 Spoon 里实际跑过**，第一次打开时如果报错，按提示调整即可。
 
 ---
 
-## 四、数据来源、合规与许可声明
+## 四、数据来源
 
-1. **2018 年真实玩家数基准**：源自 2018-07-01 Valve 成就 API 精度漏洞期间由 Tyler Glaiel 与 Ars Technica 整理的公开快照数据（参考仓库 `woctezuma/steam-reviews-to-sales` 与 Feed4Gamers/AltChar 归档数据）。
-2. **近年公开销量真值与评测统计**：来自 Gamalytic 公开基准数据集（`https://gamalytic.com/blog/how-to-accurately-estimate-steam-sales`）及通过 Steam 官方接口 `IUserReviewsService/GetAppReviews/v1/`、`ISteamNews/GetNewsForApp/v2/`、`store.steampowered.com/api/appdetails` 获取的官方里程碑公告。
-3. **在线人数与人均游玩时长**：来自 SteamCharts 与 SteamSpy 公开 API（`https://steamspy.com/api.php`），严格遵守每秒最多 1 次的请求频率限制。
-4. **合规红线声明**：
-   - 本项目**严禁且未抓取任何 SteamDB 数据**（遵守 SteamDB FAQ 条款）；
-   - 所有真实真值均附有明确出处链接，绝不凭记忆编造销量；
-   - 仅用于演示 SCD Type 2 价格拉链与每日增量快照的模拟数据单独存放在 `data/simulated/` 目录下，并在数据库字段中标注 `is_simulated = 1`，不参与任何模型的训练与评测。
+| 数据 | 来源 | 文件 |
+|---|---|---|
+| 2018-07-01 玩家数（真值） | Ars Technica 公开的成就接口泄露表 `arstechnica.com/wp-content/uploads/2018/07/games_achievements_players_2018-07-01.csv`，13,281 行 | `data/raw/source/…_ars_original.csv`、`ars_players_2018.csv` |
+| 近年公开销量（真值） | Gamalytic《How to accurately estimate Steam sales》测试表，118 行，每行附原始出处 | `data/raw/source/gamalytic_benchmark_118.csv`、`recent_sales_truth.csv` |
+| 商店信息 | `store.steampowered.com/api/appdetails`（cc=us） | `steam_appdetails.csv` |
+| 评测 | `api.steampowered.com/IUserReviewsService/GetAppReviews/v1/`，`input_json` 传参，按截止日截断 | `steam_reviews_at_cutoff.csv` |
+| 月度在线 | `steamcharts.com/app/<appid>` | `steamcharts_monthly.csv` |
+| 官方公告 | `api.steampowered.com/ISteamNews/GetNewsForApp/v2/` | `news_sales_sentences.csv` |
+| 历史价格 | 互联网档案馆 `web.archive.org` 的商店页存档 | `price_history_wayback.csv` |
+| 实时快照 | `ISteamUserStats/GetNumberOfCurrentPlayers` + 评测汇总 + appdetails | `snapshots.csv` |
+
+合规：没有访问 SteamDB（其 FAQ 禁止爬取）；所有接口都有限速（商店 1.5 秒/次、API 0.8 秒/次、SteamCharts 1.5 秒/次、档案馆每线程 2 秒/次），遇到 429 会退避；Gamalytic 的数据只用于学术对照，并注明出处。
