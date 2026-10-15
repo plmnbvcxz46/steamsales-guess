@@ -1,0 +1,9 @@
+{
+  "policy_month": "2019-11",
+  "policy_ts": 1572566400,
+  "rule": "第一个评测指数中位数 >= 2 且之后连续 6 个月都 >= 2 的月份",
+  "n_games": 40,
+  "median_index_before": 0.946,
+  "median_index_after": 3.299,
+  "jump_ratio": 3.487
+}

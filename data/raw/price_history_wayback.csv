@@ -1,0 +1,58 @@
+appid,name,observed_date,wayback_timestamp,archive_url,base_price_usd,final_price_usd,discount_percent,raw_original,raw_final
+4000,Garry's Mod,2016-01-01,20160101160632,https://web.archive.org/web/20160101160632/https://store.steampowered.com/app/4000/,9.99,2.49,75,$9.99,$2.49
+4000,Garry's Mod,2017-01-03,20170103163619,https://web.archive.org/web/20170103163619/https://store.steampowered.com/app/4000/,9.99,9.99,0,$9.99,$9.99
+4000,Garry's Mod,2019-01-11,20190111181504,https://web.archive.org/web/20190111181504/https://store.steampowered.com/app/4000/,9.99,9.99,0,$9.99,$9.99
+4000,Garry's Mod,2020-01-03,20200103184607,https://web.archive.org/web/20200103184607/https://store.steampowered.com/app/4000/,9.99,9.99,0,$9.99,$9.99
+4000,Garry's Mod,2021-01-16,20210116071117,https://web.archive.org/web/20210116071117/https://store.steampowered.com/app/4000/,9.99,9.99,0,$9.99,$9.99
+4000,Garry's Mod,2022-01-02,20220102180454,https://web.archive.org/web/20220102180454/https://store.steampowered.com/app/4000/,9.99,6.69,33,$9.99,$6.69
+4000,Garry's Mod,2023-01-14,20230114114119,https://web.archive.org/web/20230114114119/https://store.steampowered.com/app/4000/,9.99,9.99,0,$9.99,$9.99
+4000,Garry's Mod,2025-01-01,20250101033026,https://web.archive.org/web/20250101033026/https://store.steampowered.com/app/4000/,9.99,4.99,50,$9.99,$4.99
+4000,Garry's Mod,2026-01-04,20260104220510,https://web.archive.org/web/20260104220510/https://store.steampowered.com/app/4000/,9.99,4.99,50,$9.99,$4.99
+252490,Rust,2019-03-11,20190311143345,https://web.archive.org/web/20190311143345/https://store.steampowered.com/app/252490/,34.99,34.99,0,$34.99,$34.99
+252490,Rust,2023-01-28,20230128162314,https://web.archive.org/web/20230128162314/https://store.steampowered.com/app/252490/,39.99,39.99,0,$39.99,$39.99
+252490,Rust,2024-02-22,20240222075357,https://web.archive.org/web/20240222075357/https://store.steampowered.com/app/252490/,39.99,39.99,0,$39.99,$39.99
+252490,Rust,2026-01-01,20260101115226,https://web.archive.org/web/20260101115226/https://store.steampowered.com/app/252490/,39.99,19.99,50,$39.99,$19.99
+262060,Darkest Dungeon®,2016-01-01,20160101113340,https://web.archive.org/web/20160101113340/https://store.steampowered.com/app/262060/,19.99,9.99,50,$19.99,$9.99
+262060,Darkest Dungeon®,2017-01-18,20170118040918,https://web.archive.org/web/20170118040918/https://store.steampowered.com/app/262060/,24.99,24.99,0,$24.99,$24.99
+262060,Darkest Dungeon®,2018-01-02,20180102065408,https://web.archive.org/web/20180102065408/https://store.steampowered.com/app/262060/,24.99,9.99,60,$24.99,$9.99
+262060,Darkest Dungeon®,2022-02-03,20220203030008,https://web.archive.org/web/20220203030008/https://store.steampowered.com/app/262060/,24.99,3.74,85,$24.99,$3.74
+292030,The Witcher® 3: Wild Hunt,2016-01-01,20160101154333,https://web.archive.org/web/20160101154333/https://store.steampowered.com/app/292030/,59.99,29.99,50,$59.99,$29.99
+292030,The Witcher® 3: Wild Hunt,2017-01-02,20170102030354,https://web.archive.org/web/20170102030354/https://store.steampowered.com/app/292030/,39.99,19.99,50,$39.99,$19.99
+292030,The Witcher® 3: Wild Hunt,2018-09-16,20180916153646,https://web.archive.org/web/20180916153646/https://store.steampowered.com/app/292030/,39.99,39.99,0,$39.99,$39.99
+292030,The Witcher® 3: Wild Hunt,2020-02-12,20200212181549,https://web.archive.org/web/20200212181549/https://store.steampowered.com/app/292030/,39.99,39.99,0,$39.99,$39.99
+292030,The Witcher® 3: Wild Hunt,2022-01-26,20220126221101,https://web.archive.org/web/20220126221101/https://store.steampowered.com/app/292030/,39.99,39.99,0,$39.99,$39.99
+292030,The Witcher® 3: Wild Hunt,2024-01-06,20240106190408,https://web.archive.org/web/20240106190408/https://store.steampowered.com/app/292030/,39.99,39.99,0,$39.99,$39.99
+413150,Stardew Valley,2017-01-01,20170101143418,https://web.archive.org/web/20170101143418/https://store.steampowered.com/app/413150/,14.99,9.99,33,$14.99,$9.99
+413150,Stardew Valley,2021-01-01,20210101100035,https://web.archive.org/web/20210101100035/https://store.steampowered.com/app/413150/,14.99,9.99,33,$14.99,$9.99
+413150,Stardew Valley,2023-01-06,20230106140435,https://web.archive.org/web/20230106140435/https://store.steampowered.com/app/413150/,14.99,14.99,0,$14.99,$14.99
+413150,Stardew Valley,2024-01-05,20240105165850,https://web.archive.org/web/20240105165850/https://store.steampowered.com/app/413150/,14.99,14.99,0,$14.99,$14.99
+413150,Stardew Valley,2026-01-17,20260117221130,https://web.archive.org/web/20260117221130/https://store.steampowered.com/app/413150/,14.99,14.99,0,$14.99,$14.99
+433340,Slime Rancher,2016-01-16,20160116220739,https://web.archive.org/web/20160116220739/https://store.steampowered.com/app/433340/,19.99,19.99,0,$19.99,$19.99
+433340,Slime Rancher,2017-01-02,20170102030351,https://web.archive.org/web/20170102030351/https://store.steampowered.com/app/433340/,19.99,13.39,33,$19.99,$13.39
+433340,Slime Rancher,2018-01-03,20180103081444,https://web.archive.org/web/20180103081444/https://store.steampowered.com/app/433340/,19.99,13.39,33,$19.99,$13.39
+433340,Slime Rancher,2019-02-07,20190207094543,https://web.archive.org/web/20190207094543/https://store.steampowered.com/app/433340/,19.99,9.99,50,$19.99,$9.99
+433340,Slime Rancher,2021-02-03,20210203175720,https://web.archive.org/web/20210203175720/https://store.steampowered.com/app/433340/,19.99,19.99,0,$19.99,$19.99
+433340,Slime Rancher,2022-02-03,20220203015252,https://web.archive.org/web/20220203015252/https://store.steampowered.com/app/433340/,19.99,5.99,70,$19.99,$5.99
+433340,Slime Rancher,2023-02-06,20230206213703,https://web.archive.org/web/20230206213703/https://store.steampowered.com/app/433340/,19.99,19.99,0,$19.99,$19.99
+433340,Slime Rancher,2024-01-06,20240106190355,https://web.archive.org/web/20240106190355/https://store.steampowered.com/app/433340/,19.99,19.99,0,$19.99,$19.99
+433340,Slime Rancher,2025-01-08,20250108193220,https://web.archive.org/web/20250108193220/https://store.steampowered.com/app/433340/,19.99,19.99,0,$19.99,$19.99
+433340,Slime Rancher,2026-01-07,20260107183357,https://web.archive.org/web/20260107183357/https://store.steampowered.com/app/433340/,19.99,19.99,0,$19.99,$19.99
+892970,Valheim,2022-01-05,20220105044209,https://web.archive.org/web/20220105044209/https://store.steampowered.com/app/892970/,19.99,14.99,25,$19.99,$14.99
+892970,Valheim,2023-01-17,20230117115211,https://web.archive.org/web/20230117115211/https://store.steampowered.com/app/892970/,19.99,19.99,0,$19.99,$19.99
+892970,Valheim,2024-02-27,20240227004451,https://web.archive.org/web/20240227004451/https://store.steampowered.com/app/892970/,19.99,19.99,0,$19.99,$19.99
+892970,Valheim,2026-02-03,20260203143033,https://web.archive.org/web/20260203143033/https://store.steampowered.com/app/892970/,19.99,9.99,50,$19.99,$9.99
+1113000,Persona 4 Golden,2020-08-07,20200807012414,https://web.archive.org/web/20200807012414/https://store.steampowered.com/app/1113000/,19.99,19.99,0,$19.99,$19.99
+1113000,Persona 4 Golden,2023-09-27,20230927145958,https://web.archive.org/web/20230927145958/https://store.steampowered.com/app/1113000/,19.99,19.99,0,$19.99,$19.99
+1158310,Crusader Kings III,2024-01-06,20240106213251,https://web.archive.org/web/20240106213251/https://store.steampowered.com/app/1158310/,49.99,49.99,0,$49.99,$49.99
+1158310,Crusader Kings III,2025-01-09,20250109215125,https://web.archive.org/web/20250109215125/https://store.steampowered.com/app/1158310/,49.99,49.99,0,$49.99,$49.99
+1158310,Crusader Kings III,2026-01-16,20260116215036,https://web.archive.org/web/20260116215036/https://store.steampowered.com/app/1158310/,49.99,49.99,0,$49.99,$49.99
+1172620,Sea of Thieves 2023 Edition,2021-01-31,20210131183904,https://web.archive.org/web/20210131183904/https://store.steampowered.com/app/1172620/,39.99,39.99,0,$39.99,$39.99
+1172620,Sea of Thieves 2023 Edition,2022-03-25,20220325052755,https://web.archive.org/web/20220325052755/https://store.steampowered.com/app/1172620/,39.99,39.99,0,$39.99,$39.99
+1172620,Sea of Thieves 2023 Edition,2023-01-28,20230128130834,https://web.archive.org/web/20230128130834/https://store.steampowered.com/app/1172620/,39.99,39.99,0,$39.99,$39.99
+1172620,Sea of Thieves 2023 Edition,2024-01-06,20240106165755,https://web.archive.org/web/20240106165755/https://store.steampowered.com/app/1172620/,9.99,9.99,0,$9.99,$9.99
+1172620,Sea of Thieves 2023 Edition,2026-01-05,20260105174036,https://web.archive.org/web/20260105174036/https://store.steampowered.com/app/1172620/,39.99,13.99,65,$39.99,$13.99
+1326470,Sons Of The Forest,2024-01-05,20240105035415,https://web.archive.org/web/20240105035415/https://store.steampowered.com/app/1326470/,29.99,29.99,0,$29.99,$29.99
+1326470,Sons Of The Forest,2025-01-10,20250110224624,https://web.archive.org/web/20250110224624/https://store.steampowered.com/app/1326470/,29.99,29.99,0,$29.99,$29.99
+1621690,Core Keeper,2023-02-16,20230216171106,https://web.archive.org/web/20230216171106/https://store.steampowered.com/app/1621690/,12.99,10.39,20,$12.99,$10.39
+1621690,Core Keeper,2024-03-05,20240305084844,https://web.archive.org/web/20240305084844/https://store.steampowered.com/app/1621690/,15.99,15.99,0,$15.99,$15.99
+1621690,Core Keeper,2025-01-22,20250122123631,https://web.archive.org/web/20250122123631/https://store.steampowered.com/app/1621690/,19.99,19.99,0,$19.99,$19.99

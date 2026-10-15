@@ -1,0 +1,6 @@
+# 采集缓存体积大（200MB+），只保留采集日志和检查点；重新运行 crawler.py 会自动重建缓存
+data/cache/*
+!data/cache/crawl_log.csv
+!data/cache/crawler_checkpoint.json
+__pycache__/
+*.pyc

@@ -1,0 +1,32 @@
+{
+  "train2018_shard0of2": {
+    "done_count": 1982,
+    "last_appid": 271820,
+    "status": "COMPLETED",
+    "updated_at": "2026-10-15 05:10:19"
+  },
+  "train2018_shard1of2": {
+    "done_count": 1981,
+    "last_appid": 255220,
+    "status": "COMPLETED",
+    "updated_at": "2026-10-15 05:09:16"
+  },
+  "truth_gamalytic": {
+    "done_count": 118,
+    "last_appid": 1051690,
+    "status": "COMPLETED",
+    "updated_at": "2026-10-15 04:08:10"
+  },
+  "train2018_extend_shard0of1": {
+    "done_count": 1780,
+    "last_appid": 270190,
+    "status": "RUNNING",
+    "updated_at": "2026-10-15 05:17:44"
+  },
+  "train2018_extend_rev_shard0of1": {
+    "done_count": 2346,
+    "last_appid": 306440,
+    "status": "COMPLETED",
+    "updated_at": "2026-10-15 05:17:45"
+  }
+}
