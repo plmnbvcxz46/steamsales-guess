@@ -1,28 +1,50 @@
 # -*- coding: utf-8 -*-
 """
-Steam 游戏销量估算系统 - Python ETL 核心管道 (src/etl_pipeline.py)
-支持双引擎模式：
-1. 若本机安装了 MySQL + pymysql 且配置了环境变量 MYSQL_HOST，自动写入 MySQL 8.0；
-2. 默认同时写入本地 SQLite 数据仓库 (data/steam_sales_dw.db) 并导出标准 MySQL INSERT 脚本与 FineBI 视图 CSV。
+Steam 游戏销量估算系统 - Python ETL 管道 (src/etl_pipeline.py)
 
-核心工程特性（对齐往届高分示例要求）：
-- 三层数据仓库架构：原始层 (ODS) -> 明细与维度层 (DWD/DIM) -> 结果与事实层 (FACT/ADS)
-- 断点续传检查点表 (etl_checkpoint)：演示分批抽取中断后从上次最后成功的 appid 继续执行
-- 数据清洗与异常审计表 (etl_clean_error_log)：拦截免费游戏、Demo、非游戏工具、负价格与零评测异常并逐条记日志
-- SCD Type 2 缓慢变化维 (dim_price_scd2)：自动闭合旧价格版本 (effective_end, is_current=0) 并插入新版本 (version_no+1)
-- 基于 last_update_time 水位线的增量抽取 (fact_daily_snapshot)
-- 事务原子写入 (with conn:) 与 ETL 运行日志表 (etl_job_log)
+输入：crawler.py export、price_history_wayback.py、snapshot_collector.py、detect_policy_change.py 产出的 data/raw/*.csv
+输出：本地 SQLite 数据仓库 data/steam_sales_dw.db（表结构与 sql/01_schema_mysql.sql 一一对应，可导入 MySQL）
+
+分层：
+    原始层 ODS  ：接口返回的数据原样落库（ods_*）
+    明细层 DWD  ：清洗、关联、算好特征的样本宽表（dwd_game_sample），以及维度表（dim_*）
+    结果层 ADS  ：模型输出的事实表与汇总表（fact_*、ads_*，由 models.py 写入）
+运维表：etl_job_log（每个步骤一行日志）、etl_checkpoint（断点续传/增量水位线）、etl_clean_error_log（被拦截或标记的记录）
+
+用法：
+    python src/etl_pipeline.py                  # 全量重建 ODS/DWD/维度；快照表按水位线增量追加
+    python src/etl_pipeline.py --demo-resume    # 额外演示一次"清洗到一半中断、从检查点续跑"
 """
-import os
+import sys
+import csv
 import json
-import time
 import math
+import time
 import sqlite3
 import pathlib
+import datetime as dt
+
 import pandas as pd
 
 BASE_DIR = pathlib.Path(__file__).resolve().parent.parent
+RAW_DIR = BASE_DIR / "data" / "raw"
 DB_PATH = BASE_DIR / "data" / "steam_sales_dw.db"
+
+CUTOFF_2018 = "2018-07-01"
+ARS_SOURCE_URL = "https://arstechnica.com/wp-content/uploads/2018/07/games_achievements_players_2018-07-01.csv"
+# 2018 抽样门槛（与 crawler.py 一致）。为了避开截断偏差，建模只用评测数 >= MIN_REVIEWS_2018 的游戏，见 clean 步骤说明
+MIN_PLAYERS_2018 = 5000
+MIN_REVIEWS_2018 = 500
+BATCH_SIZE = 200
+
+# 主类型优先级：一款游戏往往同时挂 Action、Adventure、Indie 等多个标签，取最"具体"的那个当主类型
+GENRE_PRIORITY = ["RPG", "Strategy", "Simulation", "Racing", "Sports", "Adventure", "Action",
+                  "Casual", "Massively Multiplayer"]
+GENRE_META = [
+    (1, "Action", "动作"), (2, "Adventure", "冒险"), (3, "RPG", "角色扮演"), (4, "Strategy", "策略"),
+    (5, "Simulation", "模拟"), (6, "Casual", "休闲"), (7, "Sports & Racing", "体育竞速"),
+    (8, "Massively Multiplayer", "大型多人"), (9, "Indie Only", "仅标独立"), (10, "Other", "其他"),
+]
 
 
 def get_connection():
@@ -31,714 +53,636 @@ def get_connection():
     return conn
 
 
+# ------------------------------------------------------------------------------
+# 建表
+# ------------------------------------------------------------------------------
+DDL = [
+    # ---------------- 原始层 ----------------
+    # 原始 CSV 里有 6 组完全重复的行，原始层照原样保存，所以用文件行号当主键，去重放到清洗步骤
+    """CREATE TABLE IF NOT EXISTS ods_ars_players_2018 (
+        row_no INTEGER PRIMARY KEY, appid INTEGER NOT NULL, title TEXT, players INTEGER NOT NULL, source_url TEXT)""",
+    """CREATE TABLE IF NOT EXISTS ods_steam_appdetails (
+        appid INTEGER PRIMARY KEY, success INTEGER, name TEXT, app_type TEXT, is_free INTEGER,
+        release_date_text TEXT, release_date TEXT, currency TEXT, initial_price_usd REAL, final_price_usd REAL,
+        discount_percent INTEGER, genres TEXT, categories TEXT, developers TEXT, publishers TEXT,
+        metacritic INTEGER, achievements_total INTEGER, supports_schinese INTEGER, fetched_at TEXT)""",
+    """CREATE TABLE IF NOT EXISTS ods_steam_reviews_at_cutoff (
+        appid INTEGER NOT NULL, cohort TEXT NOT NULL, cutoff_date TEXT NOT NULL, cutoff_ts INTEGER,
+        total_reviews INTEGER, total_positive INTEGER, total_negative INTEGER, schinese_reviews INTEGER,
+        steam_purchase_reviews INTEGER, reviews_before_policy INTEGER, sample_n INTEGER,
+        sample_median_playtime_at_review_hrs REAL, sample_mean_playtime_at_review_hrs REAL, first_review_date TEXT,
+        fetched_at TEXT, PRIMARY KEY (appid, cohort, cutoff_date))""",
+    """CREATE TABLE IF NOT EXISTS ods_steamcharts_monthly (
+        appid INTEGER NOT NULL, month TEXT NOT NULL, avg_players REAL, peak_players INTEGER,
+        PRIMARY KEY (appid, month))""",
+    """CREATE TABLE IF NOT EXISTS ods_recent_sales_truth (
+        truth_id INTEGER PRIMARY KEY, appid INTEGER NOT NULL, game TEXT, report_date TEXT NOT NULL,
+        reported_sales INTEGER NOT NULL, reported_sales_text TEXT, source_url TEXT, gamalytic_estimate INTEGER,
+        benchmark_source TEXT)""",
+    """CREATE TABLE IF NOT EXISTS ods_price_history_wayback (
+        appid INTEGER NOT NULL, name TEXT, observed_date TEXT NOT NULL, wayback_timestamp TEXT,
+        base_price_usd REAL, final_price_usd REAL, discount_percent INTEGER, archive_url TEXT,
+        PRIMARY KEY (appid, wayback_timestamp))""",
+    """CREATE TABLE IF NOT EXISTS ods_review_monthly_policy_scan (
+        appid INTEGER NOT NULL, month TEXT NOT NULL, new_reviews INTEGER, PRIMARY KEY (appid, month))""",
+    # ---------------- 运维表 ----------------
+    """CREATE TABLE IF NOT EXISTS etl_job_log (
+        job_id INTEGER PRIMARY KEY AUTOINCREMENT, job_name TEXT NOT NULL, start_time TEXT NOT NULL,
+        end_time TEXT NOT NULL, rows_extracted INTEGER DEFAULT 0, rows_loaded INTEGER DEFAULT 0,
+        rows_rejected INTEGER DEFAULT 0, status TEXT NOT NULL, duration_ms INTEGER DEFAULT 0, message TEXT)""",
+    """CREATE TABLE IF NOT EXISTS etl_checkpoint (
+        job_name TEXT PRIMARY KEY, last_processed_key TEXT, last_update_time TEXT,
+        status TEXT DEFAULT 'READY', updated_at TEXT)""",
+    """CREATE TABLE IF NOT EXISTS etl_clean_error_log (
+        error_id INTEGER PRIMARY KEY AUTOINCREMENT, job_name TEXT NOT NULL, appid INTEGER NOT NULL,
+        cohort TEXT, game_name TEXT, rule_code TEXT NOT NULL, raw_value_desc TEXT,
+        clean_action TEXT NOT NULL, logged_at TEXT)""",
+    # ---------------- 维度表 ----------------
+    """CREATE TABLE IF NOT EXISTS dim_genre (
+        genre_id INTEGER PRIMARY KEY, genre_name TEXT NOT NULL UNIQUE, genre_cn_name TEXT NOT NULL)""",
+    """CREATE TABLE IF NOT EXISTS dim_release_date (
+        date_key INTEGER PRIMARY KEY, release_year INTEGER NOT NULL UNIQUE, era_code TEXT NOT NULL,
+        era_name TEXT NOT NULL, has_review_prompt_policy INTEGER NOT NULL, literature_k_multiple REAL NOT NULL)""",
+    """CREATE TABLE IF NOT EXISTS dim_estimation_method (
+        method_id INTEGER PRIMARY KEY, method_code TEXT NOT NULL UNIQUE, method_name TEXT NOT NULL,
+        signal_source TEXT NOT NULL, impl_tech TEXT NOT NULL, uses_truth_for_fitting INTEGER NOT NULL,
+        description TEXT NOT NULL)""",
+    """CREATE TABLE IF NOT EXISTS dim_game (
+        game_key INTEGER PRIMARY KEY, appid INTEGER NOT NULL UNIQUE, name TEXT NOT NULL,
+        genre_id INTEGER NOT NULL REFERENCES dim_genre(genre_id),
+        date_key INTEGER NOT NULL REFERENCES dim_release_date(date_key),
+        release_date TEXT, price_usd REAL NOT NULL, price_tier TEXT NOT NULL, is_indie INTEGER NOT NULL)""",
+    """CREATE TABLE IF NOT EXISTS dim_price_scd2 (
+        price_scd_key INTEGER PRIMARY KEY AUTOINCREMENT, appid INTEGER NOT NULL, name TEXT NOT NULL,
+        base_price_usd REAL NOT NULL, discount_percent INTEGER NOT NULL, final_price_usd REAL NOT NULL,
+        effective_start TEXT NOT NULL, effective_end TEXT NOT NULL, is_current INTEGER NOT NULL,
+        version_no INTEGER NOT NULL, observation_source TEXT NOT NULL, source_ref TEXT)""",
+    # ---------------- 明细层 ----------------
+    """CREATE TABLE IF NOT EXISTS dwd_game_sample (
+        sample_id INTEGER PRIMARY KEY, appid INTEGER NOT NULL, name TEXT NOT NULL, cohort TEXT NOT NULL,
+        era_group TEXT NOT NULL, cutoff_date TEXT NOT NULL, release_date TEXT NOT NULL, release_date_source TEXT NOT NULL,
+        release_year INTEGER NOT NULL,
+        game_age_years REAL NOT NULL, genre TEXT NOT NULL, is_indie INTEGER NOT NULL, price_usd REAL NOT NULL,
+        price_tier TEXT NOT NULL, total_reviews INTEGER NOT NULL, reviews_before_policy INTEGER NOT NULL,
+        reviews_after_policy INTEGER NOT NULL, positive_rate REAL NOT NULL, positive_rate_tier TEXT NOT NULL,
+        schinese_ratio REAL NOT NULL, steam_purchase_ratio REAL NOT NULL, playtime_review_median_hrs REAL,
+        review_sample_n INTEGER, charts_total_hours REAL, charts_coverage INTEGER NOT NULL,
+        truth_value INTEGER NOT NULL, truth_type TEXT NOT NULL, k_ratio REAL NOT NULL, log_k REAL NOT NULL,
+        log_reviews REAL NOT NULL, log_price REAL NOT NULL, model_eligible INTEGER NOT NULL,
+        eligibility_note TEXT, source_url TEXT)""",
+    # ---------------- 结果层（models.py 写入；快照表由本脚本增量写入） ----------------
+    """CREATE TABLE IF NOT EXISTS fact_sales_estimation (
+        estimation_id INTEGER PRIMARY KEY AUTOINCREMENT, sample_id INTEGER NOT NULL, appid INTEGER NOT NULL,
+        game_key INTEGER NOT NULL REFERENCES dim_game(game_key),
+        genre_id INTEGER NOT NULL REFERENCES dim_genre(genre_id),
+        date_key INTEGER NOT NULL REFERENCES dim_release_date(date_key),
+        method_id INTEGER NOT NULL REFERENCES dim_estimation_method(method_id),
+        method_code TEXT NOT NULL, cohort TEXT NOT NULL, era_group TEXT NOT NULL, total_reviews INTEGER NOT NULL,
+        price_usd REAL NOT NULL, true_value INTEGER NOT NULL, estimated_sales INTEGER NOT NULL,
+        estimated_low_bound INTEGER NOT NULL, estimated_high_bound INTEGER NOT NULL,
+        estimated_revenue_usd REAL NOT NULL, implied_k REAL NOT NULL, observed_k REAL NOT NULL,
+        pct_error REAL NOT NULL, abs_pct_error REAL NOT NULL, within_30pct_flag INTEGER NOT NULL,
+        within_50pct_flag INTEGER NOT NULL)""",
+    """CREATE TABLE IF NOT EXISTS fact_snapshot (
+        snapshot_id INTEGER PRIMARY KEY AUTOINCREMENT, fetched_at TEXT NOT NULL, round_no INTEGER NOT NULL,
+        appid INTEGER NOT NULL, name TEXT, current_players INTEGER, total_reviews INTEGER,
+        new_reviews_since_prev INTEGER, total_positive INTEGER, final_price_usd REAL, discount_percent INTEGER,
+        loaded_at TEXT NOT NULL, UNIQUE (appid, fetched_at))""",
+    """CREATE TABLE IF NOT EXISTS ads_review_monthly_index (
+        month TEXT PRIMARY KEY, median_index REAL, q25 REAL, q75 REAL, n_games INTEGER, is_policy_month INTEGER)""",
+    """CREATE TABLE IF NOT EXISTS ads_model_eval_summary (
+        eval_id INTEGER PRIMARY KEY AUTOINCREMENT, eval_cohort TEXT NOT NULL, method_code TEXT NOT NULL,
+        method_name TEXT NOT NULL, sample_size INTEGER NOT NULL, mape_pct REAL, mdape_pct REAL, r2_log REAL,
+        hit_rate_10pct REAL, hit_rate_30pct REAL, hit_rate_50pct REAL, note TEXT)""",
+    """CREATE TABLE IF NOT EXISTS ads_feature_importance (
+        feat_id INTEGER PRIMARY KEY AUTOINCREMENT, feature_code TEXT NOT NULL, feature_cn_name TEXT NOT NULL,
+        m2_ols_coef REAL, m2_std_err REAL, m2_t_stat REAL, m2_p_value REAL, m4_rf_importance_pct REAL,
+        m4_gbdt_importance_pct REAL)""",
+    """CREATE TABLE IF NOT EXISTS ads_policy_calibration (
+        calib_id INTEGER PRIMARY KEY AUTOINCREMENT, item TEXT NOT NULL, value REAL, note TEXT)""",
+]
+
+
 def init_dw_tables(conn):
-    """创建三层架构表结构、星型模型维度表与运维审计表"""
-    ddl_statements = [
-        """
-        CREATE TABLE IF NOT EXISTS ods_leak_players_2018 (
-            appid INTEGER PRIMARY KEY,
-            name TEXT NOT NULL,
-            players_2018_07_01 INTEGER NOT NULL,
-            snapshot_date TEXT NOT NULL,
-            source_url TEXT,
-            loaded_at TEXT DEFAULT CURRENT_TIMESTAMP
-        );
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS ods_steam_appdetails (
-            appid INTEGER PRIMARY KEY,
-            name TEXT,
-            app_type TEXT,
-            is_free INTEGER,
-            release_year INTEGER,
-            initial_price_usd REAL,
-            final_price_usd REAL,
-            discount_percent INTEGER,
-            main_genre TEXT,
-            achievements_count INTEGER,
-            dirty_note TEXT,
-            raw_json TEXT
-        );
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS ods_steam_reviews (
-            appid INTEGER PRIMARY KEY,
-            cutoff_date TEXT NOT NULL,
-            total_reviews INTEGER NOT NULL,
-            total_positive INTEGER NOT NULL,
-            total_negative INTEGER NOT NULL,
-            positive_rate REAL,
-            schinese_review_ratio REAL,
-            avg_playtime_at_review_hrs REAL,
-            steamspy_avg_forever_min INTEGER,
-            steamcharts_total_player_hours INTEGER,
-            steamcharts_avg_ccu REAL
-        );
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS ods_recent_sales_news (
-            audit_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            appid INTEGER NOT NULL,
-            name TEXT NOT NULL,
-            news_date TEXT NOT NULL,
-            raw_sentence TEXT NOT NULL,
-            llm_extracted_number INTEGER,
-            llm_extracted_metric TEXT,
-            llm_extracted_platform TEXT,
-            human_audit_status TEXT,
-            human_audit_reason TEXT,
-            source_url TEXT NOT NULL
-        );
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS etl_job_log (
-            job_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            job_name TEXT NOT NULL,
-            batch_date TEXT NOT NULL,
-            start_time TEXT NOT NULL,
-            end_time TEXT NOT NULL,
-            rows_extracted INTEGER DEFAULT 0,
-            rows_loaded INTEGER DEFAULT 0,
-            rows_rejected INTEGER DEFAULT 0,
-            status TEXT NOT NULL,
-            duration_ms INTEGER DEFAULT 0,
-            message TEXT
-        );
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS etl_checkpoint (
-            job_name TEXT PRIMARY KEY,
-            last_processed_appid INTEGER DEFAULT 0,
-            last_cursor TEXT DEFAULT '*',
-            last_update_time TEXT,
-            status TEXT DEFAULT 'READY',
-            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-        );
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS etl_clean_error_log (
-            error_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            job_name TEXT NOT NULL,
-            appid INTEGER NOT NULL,
-            game_name TEXT,
-            rule_code TEXT NOT NULL,
-            raw_value_desc TEXT,
-            clean_action TEXT DEFAULT 'FILTERED_OUT',
-            logged_at TEXT DEFAULT CURRENT_TIMESTAMP
-        );
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS dim_genre (
-            genre_id INTEGER PRIMARY KEY,
-            genre_name TEXT NOT NULL UNIQUE,
-            genre_cn_name TEXT NOT NULL,
-            audience_category TEXT NOT NULL
-        );
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS dim_release_date (
-            date_key INTEGER PRIMARY KEY,
-            release_year INTEGER NOT NULL UNIQUE,
-            era_code TEXT NOT NULL,
-            era_name TEXT NOT NULL,
-            has_review_prompt_policy INTEGER NOT NULL,
-            literature_k_multiple REAL NOT NULL
-        );
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS dim_estimation_method (
-            method_id INTEGER PRIMARY KEY,
-            method_code TEXT NOT NULL UNIQUE,
-            method_name TEXT NOT NULL,
-            signal_source TEXT NOT NULL,
-            impl_tech TEXT NOT NULL,
-            description TEXT NOT NULL
-        );
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS dim_game (
-            game_key INTEGER PRIMARY KEY,
-            appid INTEGER NOT NULL UNIQUE,
-            name TEXT NOT NULL,
-            genre_id INTEGER NOT NULL,
-            date_key INTEGER NOT NULL,
-            initial_price_usd REAL NOT NULL,
-            price_tier TEXT NOT NULL,
-            is_cross_era INTEGER DEFAULT 0,
-            data_cohort TEXT NOT NULL
-        );
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS dim_price_scd2 (
-            price_scd_key INTEGER PRIMARY KEY AUTOINCREMENT,
-            appid INTEGER NOT NULL,
-            name TEXT NOT NULL,
-            base_price_usd REAL NOT NULL,
-            discount_percent INTEGER NOT NULL,
-            final_price_usd REAL NOT NULL,
-            event_type TEXT,
-            effective_start TEXT NOT NULL,
-            effective_end TEXT NOT NULL,
-            is_current INTEGER NOT NULL DEFAULT 1,
-            version_no INTEGER NOT NULL DEFAULT 1,
-            is_simulated INTEGER NOT NULL DEFAULT 1
-        );
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS dwd_steam_game_aligned (
-            appid INTEGER PRIMARY KEY,
-            name TEXT NOT NULL,
-            release_year INTEGER NOT NULL,
-            genre TEXT NOT NULL,
-            price_usd REAL NOT NULL,
-            price_tier TEXT NOT NULL,
-            total_reviews INTEGER NOT NULL,
-            reviews_pre_2019 INTEGER NOT NULL,
-            reviews_post_2019 INTEGER NOT NULL,
-            positive_rate REAL NOT NULL,
-            positive_rate_tier TEXT NOT NULL,
-            schinese_ratio REAL NOT NULL,
-            avg_playtime_at_review_hrs REAL NOT NULL,
-            steamspy_avg_forever_min INTEGER NOT NULL,
-            steamcharts_total_player_hours INTEGER NOT NULL,
-            true_sales_or_players INTEGER NOT NULL,
-            k_ratio REAL NOT NULL,
-            log_k REAL NOT NULL,
-            log_reviews REAL NOT NULL,
-            log_price REAL NOT NULL,
-            data_cohort TEXT NOT NULL,
-            snapshot_or_report_date TEXT NOT NULL,
-            source_url TEXT
-        );
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS fact_sales_estimation (
-            estimation_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            appid INTEGER NOT NULL,
-            game_key INTEGER NOT NULL,
-            genre_id INTEGER NOT NULL,
-            date_key INTEGER NOT NULL,
-            method_id INTEGER NOT NULL,
-            method_code TEXT NOT NULL,
-            data_cohort TEXT NOT NULL,
-            total_reviews INTEGER NOT NULL,
-            price_usd REAL NOT NULL,
-            true_sales_or_players INTEGER NOT NULL,
-            estimated_sales INTEGER NOT NULL,
-            estimated_low_bound INTEGER NOT NULL,
-            estimated_high_bound INTEGER NOT NULL,
-            estimated_revenue_usd REAL NOT NULL,
-            implied_k REAL NOT NULL,
-            observed_k REAL NOT NULL,
-            pct_error REAL NOT NULL,
-            abs_pct_error REAL NOT NULL,
-            within_30pct_flag INTEGER NOT NULL,
-            within_50pct_flag INTEGER NOT NULL
-        );
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS fact_daily_snapshot (
-            snapshot_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            snapshot_date TEXT NOT NULL,
-            appid INTEGER NOT NULL,
-            name TEXT NOT NULL,
-            total_reviews INTEGER NOT NULL,
-            daily_new_reviews INTEGER NOT NULL,
-            current_players INTEGER NOT NULL,
-            discount_percent INTEGER NOT NULL,
-            final_price_usd REAL NOT NULL,
-            last_update_time TEXT NOT NULL,
-            is_simulated INTEGER NOT NULL DEFAULT 1
-        );
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS ads_model_eval_summary (
-            eval_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            eval_cohort TEXT NOT NULL,
-            method_code TEXT NOT NULL,
-            method_name TEXT NOT NULL,
-            sample_size INTEGER NOT NULL,
-            mape_pct REAL,
-            mdape_pct REAL,
-            r2_log REAL,
-            hit_rate_10pct REAL,
-            hit_rate_30pct REAL NOT NULL,
-            hit_rate_50pct REAL,
-            note TEXT
-        );
-        """,
-        """
-        CREATE TABLE IF NOT EXISTS ads_feature_importance (
-            feat_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            feature_code TEXT NOT NULL,
-            feature_cn_name TEXT NOT NULL,
-            m2_ols_coef REAL,
-            m2_std_err REAL,
-            m2_t_stat REAL,
-            m2_p_value REAL,
-            m4_rf_importance_pct REAL,
-            m4_gbdt_importance_pct REAL,
-            direction_desc TEXT
-        );
-        """
-    ]
     with conn:
-        for stmt in ddl_statements:
+        for stmt in DDL:
             conn.execute(stmt)
 
 
-def log_etl_job(conn, job_name, batch_date, t0, extracted, loaded, rejected, status, msg):
+def now_str():
+    return time.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def log_etl_job(conn, job_name, t0, extracted, loaded, rejected, status, msg):
     t1 = time.time()
-    dur_ms = int(round((t1 - t0) * 1000))
-    start_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(t0))
-    end_str = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(t1))
     with conn:
         conn.execute(
-            """
-            INSERT INTO etl_job_log
-            (job_name, batch_date, start_time, end_time, rows_extracted, rows_loaded, rows_rejected, status, duration_ms, message)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (job_name, batch_date, start_str, end_str, extracted, loaded, rejected, status, dur_ms, msg)
-        )
+            """INSERT INTO etl_job_log (job_name, start_time, end_time, rows_extracted, rows_loaded,
+               rows_rejected, status, duration_ms, message) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (job_name, time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(t0)),
+             time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(t1)),
+             extracted, loaded, rejected, status, int((t1 - t0) * 1000), msg))
 
 
-def classify_price_tier(price_usd):
-    if price_usd < 10.0:
-        return "1_低价独立(<$10)"
-    elif price_usd < 20.0:
-        return "2_中低定价($10-$20)"
-    elif price_usd < 40.0:
-        return "3_中高等级($20-$40)"
-    else:
-        return "4_全价大作(>=$40)"
+def none_if_nan(v):
+    if v is None:
+        return None
+    if isinstance(v, float) and math.isnan(v):
+        return None
+    return v
 
 
-def classify_pos_rate_tier(pos_rate):
-    if pos_rate < 0.60:
-        return "1_褒贬不一及以下(<60%)"
-    elif pos_rate < 0.75:
-        return "2_中度好评(60%-75%)"
-    elif pos_rate < 0.85:
-        return "3_多半好评(75%-85%)"
-    elif pos_rate < 0.93:
-        return "4_特别好评(85%-93%)"
-    else:
-        return "5_好评如潮(>=93%)"
+def load_policy():
+    with open(RAW_DIR / "policy_change_detected.json", "r", encoding="utf-8") as f:
+        return json.load(f)
 
 
-def load_ods_and_dimensions(conn):
-    """步骤1：加载原始层 (ODS) 与静态维度表 (dim_genre, dim_release_date, dim_estimation_method)"""
+# ------------------------------------------------------------------------------
+# 步骤 1：原始层全量装载
+# ------------------------------------------------------------------------------
+def load_table_from_csv(conn, table, csv_path, columns, transform=None):
+    df = pd.read_csv(csv_path)
+    rows = []
+    for rec in df.to_dict("records"):
+        if transform:
+            rec = transform(rec)
+        rows.append(tuple(none_if_nan(rec.get(c)) for c in columns))
+    with conn:
+        conn.execute(f"DELETE FROM {table};")
+        conn.executemany(f"INSERT INTO {table} ({', '.join(columns)}) VALUES ({', '.join('?' * len(columns))})", rows)
+    return len(rows)
+
+
+def load_ods(conn):
     t0 = time.time()
-    df_leak = pd.read_csv(BASE_DIR / "data/raw/games_achievements_players_2018-07-01.csv")
-    df_rev = pd.read_csv(BASE_DIR / "data/raw/steam_reviews_2018_aligned.csv")
-    df_news = pd.read_csv(BASE_DIR / "data/raw/recent_news_extraction_audit.csv")
-    with open(BASE_DIR / "data/raw/steam_appdetails_2018_aligned.json", "r", encoding="utf-8") as f:
-        app_dict = json.load(f)
+    n = 0
+    ars_row_no = iter(range(1, 1000000))
+    n += load_table_from_csv(conn, "ods_ars_players_2018", RAW_DIR / "ars_players_2018.csv",
+                             ["row_no", "appid", "title", "players", "source_url"],
+                             lambda r: {**r, "row_no": next(ars_row_no), "source_url": ARS_SOURCE_URL})
+    n += load_table_from_csv(conn, "ods_steam_appdetails", RAW_DIR / "steam_appdetails.csv",
+                             ["appid", "success", "name", "app_type", "is_free", "release_date_text", "release_date",
+                              "currency", "initial_price_usd", "final_price_usd", "discount_percent", "genres",
+                              "categories", "developers", "publishers", "metacritic", "achievements_total",
+                              "supports_schinese", "fetched_at"])
+    n += load_table_from_csv(conn, "ods_steam_reviews_at_cutoff", RAW_DIR / "steam_reviews_at_cutoff.csv",
+                             ["appid", "cohort", "cutoff_date", "cutoff_ts", "total_reviews", "total_positive",
+                              "total_negative", "schinese_reviews", "steam_purchase_reviews", "reviews_before_policy",
+                              "sample_n", "sample_median_playtime_at_review_hrs",
+                              "sample_mean_playtime_at_review_hrs", "first_review_date", "fetched_at"])
+    n += load_table_from_csv(conn, "ods_steamcharts_monthly", RAW_DIR / "steamcharts_monthly.csv",
+                             ["appid", "month", "avg_players", "peak_players"])
+    # 真值表本身没有主键（同一款游戏可能有两个公布日期，比如 Missing Hiker），按文件里的行号编 truth_id
+    row_no = iter(range(1, 100000))
+    n += load_table_from_csv(conn, "ods_recent_sales_truth", RAW_DIR / "recent_sales_truth.csv",
+                             ["truth_id", "appid", "game", "report_date", "reported_sales", "reported_sales_text",
+                              "source_url", "gamalytic_estimate", "benchmark_source"],
+                             lambda r: {**r, "truth_id": next(row_no)})
+    if (RAW_DIR / "price_history_wayback.csv").exists():
+        n += load_table_from_csv(conn, "ods_price_history_wayback", RAW_DIR / "price_history_wayback.csv",
+                                 ["appid", "name", "observed_date", "wayback_timestamp", "base_price_usd",
+                                  "final_price_usd", "discount_percent", "archive_url"])
+    n += load_table_from_csv(conn, "ods_review_monthly_policy_scan", RAW_DIR / "review_monthly_policy_scan.csv",
+                             ["appid", "month", "new_reviews"])
+    log_etl_job(conn, "ODS_FULL_LOAD", t0, n, n, 0, "SUCCESS", "原始层 7 张表全量装载（先清空再写入，同一事务）")
 
+
+# ------------------------------------------------------------------------------
+# 步骤 2：静态维度
+# ------------------------------------------------------------------------------
+def load_static_dims(conn, policy):
+    t0 = time.time()
+    policy_year = int(policy["policy_month"][:4])
     with conn:
-        conn.execute("DELETE FROM ods_leak_players_2018;")
-        conn.execute("DELETE FROM ods_steam_appdetails;")
-        conn.execute("DELETE FROM ods_steam_reviews;")
-        conn.execute("DELETE FROM ods_recent_sales_news;")
-
-        for _, r in df_leak.iterrows():
-            conn.execute(
-                "INSERT INTO ods_leak_players_2018 (appid, name, players_2018_07_01, snapshot_date, source_url) VALUES (?, ?, ?, ?, ?)",
-                (int(r["appid"]), r["name"], int(r["players_2018_07_01"]), r["snapshot_date"], r["source_url"])
-            )
-
-        for appid_str, payload in app_dict.items():
-            d = payload["data"]
-            p_obj = d.get("price_overview")
-            init_p = (p_obj["initial"] / 100.0) if p_obj else 0.0
-            fin_p = (p_obj["final"] / 100.0) if p_obj else 0.0
-            disc = p_obj["discount_percent"] if p_obj else 0
-            rel_str = d.get("release_date", {}).get("date", "2015")
-            rel_year = int(rel_str.split(",")[-1].strip()) if "," in rel_str else 2015
-            genre = d.get("genres", [{}])[0].get("description", "Action")
-            ach_cnt = d.get("achievements", {}).get("total", 0)
-            conn.execute(
-                """
-                INSERT INTO ods_steam_appdetails
-                (appid, name, app_type, is_free, release_year, initial_price_usd, final_price_usd, discount_percent, main_genre, achievements_count, dirty_note, raw_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (int(appid_str), d["name"], d["type"], 1 if d["is_free"] else 0, rel_year, init_p, fin_p, disc, genre, ach_cnt, d.get("dirty_note", ""), json.dumps(d, ensure_ascii=False))
-            )
-
-        for _, r in df_rev.iterrows():
-            conn.execute(
-                """
-                INSERT INTO ods_steam_reviews
-                (appid, cutoff_date, total_reviews, total_positive, total_negative, positive_rate, schinese_review_ratio, avg_playtime_at_review_hrs, steamspy_avg_forever_min, steamcharts_total_player_hours, steamcharts_avg_ccu)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (int(r["appid"]), r["cutoff_date"], int(r["total_reviews_2018"]), int(r["total_positive_2018"]), int(r["total_negative_2018"]),
-                 float(r["positive_rate_2018"]), float(r["schinese_review_ratio"]), float(r["avg_playtime_at_review_hrs"]),
-                 int(r["steamspy_avg_forever_min"]), int(r["steamcharts_total_player_hours"]), float(r["steamcharts_avg_ccu"]))
-            )
-
-        for _, r in df_news.iterrows():
-            conn.execute(
-                """
-                INSERT INTO ods_recent_sales_news
-                (appid, name, news_date, raw_sentence, llm_extracted_number, llm_extracted_metric, llm_extracted_platform, human_audit_status, human_audit_reason, source_url)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (int(r["appid"]), r["name"], r["news_date"], r["raw_sentence"], int(r["llm_extracted_number"]),
-                 r["llm_extracted_metric"], r["llm_extracted_platform"], r["human_audit_status"], r["human_audit_reason"], r["source_url"])
-            )
-
-        # 初始化静态维度表 dim_genre
-        conn.execute("DELETE FROM dim_genre;")
-        genres_meta = [
-            (1, "Action", "动作射击", "核心大众受众"),
-            (2, "RPG", "角色扮演", "深度叙事受众"),
-            (3, "Strategy", "策略战棋", "长时硬核受众"),
-            (4, "Simulation", "模拟建造", "长尾模拟受众"),
-            (5, "Adventure", "冒险解谜", "剧情体验受众"),
-            (6, "Indie", "独立创意", "高评论意愿核心受众"),
-            (7, "Survival", "生存建造", "联机高粘性受众"),
-            (8, "Sports", "体育竞速", "低评论率泛大众受众"),
-        ]
-        conn.executemany("INSERT INTO dim_genre VALUES (?, ?, ?, ?);", genres_meta)
-
-        # 初始化静态维度表 dim_release_date
-        conn.execute("DELETE FROM dim_release_date;")
-        for yr in range(2003, 2026):
-            if yr <= 2016:
-                era_code, era_name, has_pol, lit_k = "ERA_EARLY", "早期Steam阶段(<=2016)", 0, 74.0
-            elif yr in (2017, 2018):
-                era_code, era_name, has_pol, lit_k = "ERA_PRE_POLICY", "直通发售后评测提示前(2017-2018)", 0, 60.0
-            elif yr == 2019:
-                era_code, era_name, has_pol, lit_k = "ERA_TRANSITION", "评测提示政策上线过渡期(2019)", 1, 51.0
-            else:
-                era_code, era_name, has_pol, lit_k = "ERA_POST_POLICY", "游玩后提示写评测时代(>=2020)", 1, 38.0
-            conn.execute("INSERT INTO dim_release_date VALUES (?, ?, ?, ?, ?, ?);", (yr, yr, era_code, era_name, has_pol, lit_k))
-
-        # 初始化静态维度表 dim_estimation_method
-        conn.execute("DELETE FROM dim_estimation_method;")
-        methods_meta = [
-            (1, "M0", "M0: 固定倍数基线 (k=30)", "仅评测信号A", "SQL", "经典 Boxleiter 固定常数：销量 = 评测数 × 30"),
-            (2, "M1", "M1: 按年份分段文献值", "仅评测信号A", "SQL", "按发售年代取文献中位数：<=2016取74, 17-18取60, 2019取51, >=2020取38"),
-            (3, "M2", "M2: 对数线性回归 (含年代校准)", "仅评测信号A", "Python Stats", "综合价格、好评率倒U形二次项、评测规模、游玩时长与中文占比的多元对数回归"),
-            (4, "M3", "M3: 分位数回归 (中位数+80%区间)", "仅评测信号A", "Python Stats", "基于 Pinball Loss 与残差分位数给出稳健中位数预测及 [P10, P90] 置信区间"),
-            (5, "M4", "M4: 梯度提升/随机森林树模型", "仅评测信号A", "Python ML", "非线性决策树集成学习，自动捕捉好评率倒U形与价格-时长交互效应"),
-            (6, "Signal_B", "信号B: 在线人数与人均时长推算", "仅在线信号B", "Python Stats", "与评测无关：累计总游玩小时数 ÷ 校准后人均游玩时长（不受2019评测弹窗政策影响）"),
-            (7, "Fusion_AB", "Fusion: 评测信号A + 在线信号B 加权融合", "A+B双信号融合", "Python ML", "对数空间双信号最优加权融合：突破单一评测信号的信息瓶颈"),
-        ]
-        conn.executemany("INSERT INTO dim_estimation_method VALUES (?, ?, ?, ?, ?, ?);", methods_meta)
-
-    total_ods = len(df_leak) + len(app_dict) + len(df_rev) + len(df_news)
-    log_etl_job(conn, "ODS_AND_STATIC_DIM_LOAD", "2026-10-12", t0, total_ods, total_ods, 0, "SUCCESS", "原始层四张表与静态维度表全量入库完成")
-
-
-def clean_and_load_dwd_with_checkpoint(conn):
-    """
-    步骤2：执行 ODS -> DWD 清洗转换，演示检查点断点续传 (etl_checkpoint) 与清洗异常日志 (etl_clean_error_log)
-    为什么分两批模拟断点续传：验证当批处理在第 150 条中断时，重启任务能够读取 etl_checkpoint 的 last_processed_appid 接着跑，不丢不重。
-    """
-    with conn:
-        conn.execute("DELETE FROM dwd_steam_game_aligned;")
+        # 事实表外键指向这些维度，重建维度前先清空事实表（models.py 会重新写入）
+        conn.execute("DELETE FROM fact_sales_estimation;")
         conn.execute("DELETE FROM dim_game;")
-        conn.execute("DELETE FROM etl_clean_error_log;")
-        conn.execute("DELETE FROM etl_checkpoint WHERE job_name = 'CLEAN_ODS_TO_DWD';")
-        conn.execute(
-            "INSERT INTO etl_checkpoint (job_name, last_processed_appid, last_cursor, last_update_time, status) VALUES ('CLEAN_ODS_TO_DWD', 0, 'BATCH_0', '2018-07-01 00:00:00', 'READY');"
-        )
+        conn.execute("DELETE FROM dim_genre;")
+        conn.executemany("INSERT INTO dim_genre VALUES (?, ?, ?)", GENRE_META)
 
-    # 读取 ODS 关联数据，按 appid 升序排列以便基于 last_processed_appid 断点续传
-    query = """
-    SELECT
-        p.appid, p.name, p.players_2018_07_01, p.snapshot_date, p.source_url,
-        a.app_type, a.is_free, a.release_year, a.initial_price_usd, a.main_genre, a.dirty_note,
-        r.total_reviews, r.positive_rate, r.schinese_review_ratio,
-        r.avg_playtime_at_review_hrs, r.steamspy_avg_forever_min, r.steamcharts_total_player_hours
-    FROM ods_leak_players_2018 p
-    JOIN ods_steam_appdetails a ON p.appid = a.appid
-    JOIN ods_steam_reviews r ON p.appid = r.appid
-    ORDER BY p.appid ASC
+        # 文献 k 值（M1 用）：设计文档 3.5 节整理的业界经验值，2017 年前 74、2019 年 51、2020 年后 38；
+        # 2017-2018 文档没有给，取 74 和 51 之间的 60，并在报告里注明是插值
+        conn.execute("DELETE FROM dim_release_date;")
+        for yr in range(1990, 2027):  # Steam 上有 1990 年代的老游戏（如 Half-Life）
+            if yr <= 2016:
+                row = ("ERA_EARLY", "早期(<=2016)", 0, 74.0)
+            elif yr <= 2018:
+                row = ("ERA_PRE_POLICY", "提示上线前(2017-2018)", 0, 60.0)
+            elif yr == policy_year:
+                row = ("ERA_TRANSITION", f"提示上线当年({yr})", 1, 51.0)
+            else:
+                row = ("ERA_POST_POLICY", f"提示上线后(>={policy_year + 1})", 1, 38.0)
+            conn.execute("INSERT INTO dim_release_date VALUES (?, ?, ?, ?, ?, ?)", (yr, yr) + row)
+
+        conn.execute("DELETE FROM dim_estimation_method;")
+        methods = [
+            (1, "M0", "M0 固定倍数 k=30", "评测", "SQL", 0, "销量 = 评测数 × 30"),
+            (2, "M1", "M1 按发售年份取文献 k", "评测", "SQL", 0, "<=2016:74, 2017-18:60, 2019:51, >=2020:38"),
+            (3, "M2", "M2 对数线性回归", "评测", "Python", 1,
+             "2018 数据学 ln k；估近年销量时再用真值集把系数重估一遍（留一法）"),
+            (4, "M3", "M3 分位数回归(中位数+80%区间)", "评测", "Python", 1, "2018 拟合 10%/50%/90% 分位；近年样本中位数沿用 M2 校准"),
+            (5, "M4", "M4 随机森林+梯度提升树", "评测", "Python", 1, "手写 CART 集成；近年校准同 M2"),
+            (6, "Signal_B", "信号B 在线人数×时长", "在线", "Python", 0,
+             "SteamCharts 累计游玩小时 ÷ 人均小时（人均小时用 2018 真值校准评测者时长）"),
+            (7, "Fusion_AB", "融合 A(M4)+B", "评测+在线", "Python", 1, "对数空间加权；校准与权重都用嵌套留一法"),
+        ]
+        conn.executemany("INSERT INTO dim_estimation_method VALUES (?, ?, ?, ?, ?, ?, ?)", methods)
+    log_etl_job(conn, "STATIC_DIM_LOAD", t0, 0, len(GENRE_META), 0, "SUCCESS", "类型/年份/估算方法三张静态维度表")
+
+
+# ------------------------------------------------------------------------------
+# 步骤 3：清洗 ODS -> DWD（分批提交 + 检查点断点续传）
+# ------------------------------------------------------------------------------
+def classify_price_tier(p):
+    if p < 10:
+        return "1_<$10"
+    if p < 20:
+        return "2_$10-20"
+    if p < 40:
+        return "3_$20-40"
+    return "4_>=$40"
+
+
+def classify_pos_rate_tier(r):
+    if r < 0.60:
+        return "1_<60%"
+    if r < 0.70:
+        return "2_60-70%"
+    if r < 0.80:
+        return "3_70-80%"
+    if r < 0.90:
+        return "4_80-90%"
+    if r < 0.95:
+        return "5_90-95%"
+    return "6_>=95%"
+
+
+def main_genre(genres_text):
+    tags = [g for g in str(genres_text or "").split("|") if g]
+    for g in GENRE_PRIORITY:
+        if g in tags:
+            return "Sports & Racing" if g in ("Racing", "Sports") else g
+    return "Indie Only" if "Indie" in tags else "Other"
+
+
+def charts_hours_before(month_rows, cutoff_date):
+    """SteamCharts 月均在线 × 当月小时数，累加到截止日所在月份之前（不算不完整的当月）。"""
+    cutoff_month = cutoff_date[:7]
+    total = 0.0
+    for month, avg in month_rows:
+        if month >= cutoff_month:
+            continue
+        y, m = map(int, month.split("-"))
+        days = (dt.date(y + (m == 12), m % 12 + 1, 1) - dt.date(y, m, 1)).days
+        total += avg * days * 24
+    return total
+
+
+def build_candidates(conn, policy):
+    """把三个来源拼成"候选样本"：2018 训练样本来自 Ars 泄露表，真值样本来自 Gamalytic 测试表。"""
+    apps = {r[0]: r for r in conn.execute(
+        "SELECT appid, success, name, app_type, is_free, release_date, initial_price_usd, genres FROM ods_steam_appdetails")}
+    reviews = {(r[0], r[1], r[2]): r for r in conn.execute(
+        """SELECT appid, cohort, cutoff_date, total_reviews, total_positive, schinese_reviews, steam_purchase_reviews,
+                  reviews_before_policy, sample_n, sample_median_playtime_at_review_hrs, first_review_date
+           FROM ods_steam_reviews_at_cutoff""")}
+    charts = {}
+    for appid, month, avg in conn.execute("SELECT appid, month, avg_players FROM ods_steamcharts_monthly ORDER BY month"):
+        charts.setdefault(appid, []).append((month, avg))
+
+    cands = []
+    for appid, title, players, n_rows in conn.execute(
+            """SELECT appid, MAX(title), MAX(players), COUNT(*) FROM ods_ars_players_2018
+               WHERE players >= ? GROUP BY appid ORDER BY appid""", (MIN_PLAYERS_2018,)):
+        if appid not in apps:
+            continue  # 还没爬到（采集只跑了一部分时会出现），不算清洗问题
+        cands.append({"key": f"A{appid:08d}", "appid": appid, "cohort": "train_2018", "cutoff_date": CUTOFF_2018,
+                      "truth_value": players, "truth_type": "players_2018_leak", "source_url": ARS_SOURCE_URL,
+                      "fallback_name": title, "dup_rows": n_rows})
+    for truth_id, appid, game, report_date, sales, src in conn.execute(
+            "SELECT truth_id, appid, game, report_date, reported_sales, source_url FROM ods_recent_sales_truth ORDER BY truth_id"):
+        cands.append({"key": f"T{truth_id:08d}", "appid": appid, "cohort": "truth", "cutoff_date": report_date,
+                      "truth_value": sales, "truth_type": "reported_sales", "source_url": src, "fallback_name": game})
+    cands.sort(key=lambda c: c["key"])
+    return cands, apps, reviews, charts
+
+
+def clean_one(c, apps, reviews, charts, policy):
     """
-    rows = conn.execute(query).fetchall()
-    genre_map = dict(conn.execute("SELECT genre_name, genre_id FROM dim_genre").fetchall())
+    返回 (dwd 行 或 None, [(规则码, 说明, 处理方式), ...])。
+    处理方式 FILTERED_OUT = 不进明细层；FLAGGED = 进明细层但不参与建模（model_eligible=0）。
+    """
+    issues = []
+    if c.get("dup_rows", 1) > 1:
+        issues.append(("DUPLICATE_SOURCE_ROW", f"原始 CSV 中重复 {c['dup_rows']} 次，按 appid 去重保留一条", "DEDUPLICATED"))
+    a = apps.get(c["appid"])
+    if a is None or not a[1]:
+        return None, issues + [("DELISTED_OR_UNAVAILABLE", "appdetails success=false（已下架或锁区）", "FILTERED_OUT")]
+    _, _, name, app_type, is_free, release_date, price, genres = a
+    if app_type != "game":
+        return None, issues + [("NON_GAME", f"app_type={app_type}", "FILTERED_OUT")]
+    if is_free:
+        return None, issues + [("FREE_GAME", "is_free=1，免费游戏 k 约为付费的两倍，不在研究范围", "FILTERED_OUT")]
+    if price is None or price <= 0:
+        return None, issues + [("NO_PRICE", "商店没有美元价格（可能停售）", "FILTERED_OUT")]
+    rv = reviews.get((c["appid"], c["cohort"], c["cutoff_date"]))
+    if rv is None:
+        return None, issues + [("NO_REVIEW_DATA", "评测接口未取到数据", "FILTERED_OUT")]
+    _, _, _, tot, pos, sch, steam_p, before_pol, sample_n, pt_med, first_review = rv
+    if not tot or tot <= 0:
+        return None, issues + [("ZERO_REVIEWS", f"截至 {c['cutoff_date']} 评测数为 0", "FILTERED_OUT")]
 
-    # 第一阶段：处理前 150 条后模拟发生网络/进程中断，更新检查点
+    # 实际上架日期：商店发售日、第一条评测日期、SteamCharts 第一个月，三者取最早。
+    # 坑：抢先体验游戏转正后，商店显示的是正式版日期（比如 Core Keeper 显示 2024 年），
+    # 第一版清洗把这些游戏全当成"发售日晚于截止日"丢掉了，真值集一下少了 14 款。
+    month_rows = charts.get(c["appid"], [])
+    options = []
+    if release_date:
+        options.append((release_date, "store"))
+    if first_review:
+        options.append((first_review, "first_review"))
+    # SteamCharts 只有月份，补成当月 1 号会比商店日期早几天；只有首月早于商店发售所在月时才采用，避免误判
+    if month_rows and (not release_date or month_rows[0][0] < release_date[:7]):
+        options.append((month_rows[0][0] + "-01", "steamcharts_first_month"))
+    if not options:
+        return None, issues + [("RELEASE_DATE_UNKNOWN", "商店发售日无法解析，也没有其他日期来源", "FILTERED_OUT")]
+    release_date, release_src = min(options)
+    if release_src != "store":
+        issues.append(("RELEASE_DATE_ADJUSTED", f"商店发售日 {a[5]}，改用 {release_src} = {release_date}", "FLAGGED"))
+    if release_date > c["cutoff_date"]:
+        return None, issues + [("RELEASED_AFTER_CUTOFF",
+                       f"上架日期 {release_date} 晚于截止日 {c['cutoff_date']}", "FILTERED_OUT")]
+
+    policy_date = policy["policy_month"] + "-01"
+    if c["cohort"] == "train_2018" or c["cutoff_date"] < policy_date:
+        era_group = "pre_policy"
+        before = tot
+    elif release_date >= policy_date:
+        era_group = "post_policy"
+        before = 0
+    else:
+        era_group = "cross_era"
+        before = int(before_pol) if before_pol is not None and not (isinstance(before_pol, float) and math.isnan(before_pol)) else 0
+    before = min(before, tot)
+
+    rel = dt.date.fromisoformat(release_date)
+    cut = dt.date.fromisoformat(c["cutoff_date"])
+    age_years = max((cut - rel).days / 365.25, 1 / 12)
+
+    coverage = 0
+    hours = None
+    if month_rows:
+        first_month = month_rows[0][0]
+        # 只有 SteamCharts 从发售后两个月内就开始记录，累计小时才算完整；2012 年 7 月以前发售的游戏都不完整
+        rel_plus2 = (rel.replace(day=1) + dt.timedelta(days=62)).strftime("%Y-%m")
+        if first_month <= rel_plus2 and first_month < c["cutoff_date"][:7]:
+            coverage = 1
+            hours = charts_hours_before(month_rows, c["cutoff_date"])
+            if hours <= 0:
+                coverage, hours = 0, None
+
+    eligible, note = 1, ""
+    if c["cohort"] == "train_2018" and tot < MIN_REVIEWS_2018:
+        eligible, note = 0, f"评测数 {tot} < {MIN_REVIEWS_2018}，受抽样门槛截断影响，不参与 2018 建模"
+        issues.append(("TRUNCATION_RISK", note, "FLAGGED"))
+
+    k = c["truth_value"] / tot
+    row = {
+        "appid": c["appid"], "name": name or c["fallback_name"], "cohort": c["cohort"], "era_group": era_group,
+        "cutoff_date": c["cutoff_date"], "release_date": release_date, "release_date_source": release_src,
+        "release_year": rel.year,
+        "game_age_years": round(age_years, 4), "genre": main_genre(genres),
+        "is_indie": int("Indie" in str(genres or "").split("|")), "price_usd": float(price),
+        "price_tier": classify_price_tier(float(price)), "total_reviews": int(tot),
+        "reviews_before_policy": int(before), "reviews_after_policy": int(tot - before),
+        "positive_rate": round(pos / tot, 4), "positive_rate_tier": classify_pos_rate_tier(pos / tot),
+        "schinese_ratio": round((sch or 0) / tot, 4), "steam_purchase_ratio": round((steam_p or 0) / tot, 4),
+        "playtime_review_median_hrs": none_if_nan(pt_med), "review_sample_n": int(sample_n or 0),
+        "charts_total_hours": round(hours, 1) if hours else None, "charts_coverage": coverage,
+        "truth_value": int(c["truth_value"]), "truth_type": c["truth_type"], "k_ratio": round(k, 4),
+        "log_k": round(math.log(k), 6), "log_reviews": round(math.log(tot), 6),
+        "log_price": round(math.log(float(price)), 6), "model_eligible": eligible, "eligibility_note": note,
+        "source_url": c["source_url"],
+    }
+    return row, issues
+
+
+DWD_COLS = ["sample_id", "appid", "name", "cohort", "era_group", "cutoff_date", "release_date", "release_date_source",
+            "release_year",
+            "game_age_years", "genre", "is_indie", "price_usd", "price_tier", "total_reviews", "reviews_before_policy",
+            "reviews_after_policy", "positive_rate", "positive_rate_tier", "schinese_ratio", "steam_purchase_ratio",
+            "playtime_review_median_hrs", "review_sample_n", "charts_total_hours", "charts_coverage", "truth_value",
+            "truth_type", "k_ratio", "log_k", "log_reviews", "log_price", "model_eligible", "eligibility_note",
+            "source_url"]
+
+
+class SimulatedCrash(Exception):
+    pass
+
+
+def clean_ods_to_dwd(conn, policy, crash_after_batches=None):
+    """
+    逐批清洗：每处理 BATCH_SIZE 条就提交一次事务，并把这一批最后一条的样本键写进 etl_checkpoint。
+    如果进程中途挂掉，下次运行时先读检查点，只处理键比它大的样本，已经提交的批次不会重复写。
+    crash_after_batches 用来在答辩时演示"中断 -> 续跑"：处理到第 N 批后故意抛异常。
+    """
+    job = "CLEAN_ODS_TO_DWD"
     t0 = time.time()
-    loaded_b1, rejected_b1 = 0, 0
-    last_appid_b1 = 0
+    cp = conn.execute("SELECT last_processed_key, status FROM etl_checkpoint WHERE job_name = ?", (job,)).fetchone()
+    if cp is None or cp[1] == "COMPLETED":
+        # 上次已正常结束（或从没跑过）：本次是全量重建
+        with conn:
+            conn.execute("DELETE FROM dwd_game_sample;")
+            conn.execute("DELETE FROM etl_clean_error_log WHERE job_name = ?;", (job,))
+            conn.execute("INSERT OR REPLACE INTO etl_checkpoint VALUES (?, '', NULL, 'RUNNING', ?)", (job, now_str()))
+        resume_key = ""
+    else:
+        resume_key = cp[0] or ""
+        print(f"[ETL] 检测到上次未完成（状态 {cp[1]}），从样本键 > {resume_key} 继续", flush=True)
+
+    cands, apps, reviews, charts = build_candidates(conn, policy)
+    todo = [c for c in cands if c["key"] > resume_key]
+    next_id = (conn.execute("SELECT COALESCE(MAX(sample_id), 0) FROM dwd_game_sample").fetchone()[0]) + 1
+    loaded = rejected = 0
+    for b in range(0, len(todo), BATCH_SIZE):
+        batch = todo[b:b + BATCH_SIZE]
+        with conn:  # 一批一个事务：要么整批写入并推进检查点，要么整批都不生效
+            for c in batch:
+                row, issues = clean_one(c, apps, reviews, charts, policy)
+                for code, desc, action in issues:
+                    conn.execute(
+                        """INSERT INTO etl_clean_error_log (job_name, appid, cohort, game_name, rule_code,
+                           raw_value_desc, clean_action, logged_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (job, c["appid"], c["cohort"], c["fallback_name"], code, desc, action, now_str()))
+                if row is None:
+                    rejected += 1
+                    continue
+                row["sample_id"] = next_id
+                next_id += 1
+                conn.execute(f"INSERT INTO dwd_game_sample ({', '.join(DWD_COLS)}) VALUES ({', '.join('?' * len(DWD_COLS))})",
+                             tuple(row[col] for col in DWD_COLS))
+                loaded += 1
+            conn.execute("UPDATE etl_checkpoint SET last_processed_key = ?, status = 'RUNNING', updated_at = ? WHERE job_name = ?",
+                         (batch[-1]["key"], now_str(), job))
+        if crash_after_batches is not None and (b // BATCH_SIZE + 1) >= crash_after_batches:
+            with conn:
+                conn.execute("UPDATE etl_checkpoint SET status = 'INTERRUPTED', updated_at = ? WHERE job_name = ?", (now_str(), job))
+            log_etl_job(conn, job + "_PART1", t0, b + len(batch), loaded, rejected, "INTERRUPTED",
+                        f"演示：处理 {crash_after_batches} 批后中断，检查点停在 {batch[-1]['key']}")
+            raise SimulatedCrash(batch[-1]["key"])
     with conn:
-        for idx, r in enumerate(rows[:150]):
-            (appid, name, players, snap_date, src_url, app_type, is_free, rel_year, price_usd,
-             genre, dirty_note, tot_rev, pos_rate, sch_ratio, avg_play_hrs, spy_min, charts_hrs) = r
-            last_appid_b1 = appid
-            if app_type != "game":
-                rule = "DEMO_VERSION" if app_type == "demo" else "NON_GAME_SOFTWARE"
-                conn.execute("INSERT INTO etl_clean_error_log (job_name, appid, game_name, rule_code, raw_value_desc) VALUES (?, ?, ?, ?, ?)",
-                             ("CLEAN_ODS_TO_DWD", appid, name, rule, f"app_type={app_type}"))
-                rejected_b1 += 1
-                continue
-            if is_free == 1:
-                conn.execute("INSERT INTO etl_clean_error_log (job_name, appid, game_name, rule_code, raw_value_desc) VALUES (?, ?, ?, ?, ?)",
-                             ("CLEAN_ODS_TO_DWD", appid, name, "FREE_GAME", f"is_free=1, price={price_usd}"))
-                rejected_b1 += 1
-                continue
-            if price_usd <= 0:
-                conn.execute("INSERT INTO etl_clean_error_log (job_name, appid, game_name, rule_code, raw_value_desc) VALUES (?, ?, ?, ?, ?)",
-                             ("CLEAN_ODS_TO_DWD", appid, name, "INVALID_PRICE", f"initial_price_usd={price_usd}"))
-                rejected_b1 += 1
-                continue
-            if tot_rev <= 0:
-                conn.execute("INSERT INTO etl_clean_error_log (job_name, appid, game_name, rule_code, raw_value_desc) VALUES (?, ?, ?, ?, ?)",
-                             ("CLEAN_ODS_TO_DWD", appid, name, "ZERO_REVIEWS", f"total_reviews={tot_rev}"))
-                rejected_b1 += 1
-                continue
+        conn.execute("UPDATE etl_checkpoint SET status = 'COMPLETED', updated_at = ? WHERE job_name = ?", (now_str(), job))
+    log_etl_job(conn, job + ("_RESUME" if resume_key else ""), t0, len(todo), loaded, rejected, "SUCCESS",
+                f"从样本键 > '{resume_key}' 开始处理 {len(todo)} 条候选，入明细层 {loaded} 条，拦截 {rejected} 条")
 
-            k_val = players / tot_rev
-            p_tier = classify_price_tier(price_usd)
-            pos_tier = classify_pos_rate_tier(pos_rate)
-            conn.execute(
-                """
-                INSERT INTO dwd_steam_game_aligned VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (appid, name, rel_year, genre, price_usd, p_tier, tot_rev, tot_rev, 0, pos_rate, pos_tier,
-                 sch_ratio, avg_play_hrs, spy_min, charts_hrs, players, round(k_val, 4),
-                 round(math.log(k_val), 4), round(math.log(tot_rev), 4), round(math.log(price_usd), 4),
-                 "train_2018", snap_date, src_url)
-            )
-            loaded_b1 += 1
 
-        conn.execute(
-            "UPDATE etl_checkpoint SET last_processed_appid = ?, last_cursor = 'BATCH_1_INTERRUPTED', status = 'INTERRUPTED', updated_at = CURRENT_TIMESTAMP WHERE job_name = 'CLEAN_ODS_TO_DWD';",
-            (last_appid_b1,)
-        )
-    log_etl_job(conn, "CLEAN_ODS_TO_DWD_PART1", "2026-10-12", t0, 150, loaded_b1, rejected_b1, "INTERRUPTED",
-                f"模拟第150条处断点保存，checkpoint.last_processed_appid={last_appid_b1}")
-
-    # 第二阶段：从 etl_checkpoint 读取 last_processed_appid 断点续传剩余记录
-    t1 = time.time()
-    cp_row = conn.execute("SELECT last_processed_appid FROM etl_checkpoint WHERE job_name = 'CLEAN_ODS_TO_DWD'").fetchone()
-    resume_appid = cp_row[0]
-    remaining_rows = [r for r in rows if r[0] > resume_appid]
-
-    loaded_b2, rejected_b2 = 0, 0
-    last_appid_b2 = resume_appid
+def build_dim_game(conn):
+    t0 = time.time()
+    genre_map = dict(conn.execute("SELECT genre_name, genre_id FROM dim_genre").fetchall())
+    rows = conn.execute(
+        """SELECT appid, MAX(name), MAX(genre), MAX(release_date), MAX(release_year), MAX(price_usd), MAX(price_tier), MAX(is_indie)
+           FROM dwd_game_sample GROUP BY appid ORDER BY appid""").fetchall()
     with conn:
-        for r in remaining_rows:
-            (appid, name, players, snap_date, src_url, app_type, is_free, rel_year, price_usd,
-             genre, dirty_note, tot_rev, pos_rate, sch_ratio, avg_play_hrs, spy_min, charts_hrs) = r
-            last_appid_b2 = appid
-            if app_type != "game":
-                rule = "DEMO_VERSION" if app_type == "demo" else "NON_GAME_SOFTWARE"
-                conn.execute("INSERT INTO etl_clean_error_log (job_name, appid, game_name, rule_code, raw_value_desc) VALUES (?, ?, ?, ?, ?)",
-                             ("CLEAN_ODS_TO_DWD", appid, name, rule, f"app_type={app_type}"))
-                rejected_b2 += 1
-                continue
-            if is_free == 1:
-                conn.execute("INSERT INTO etl_clean_error_log (job_name, appid, game_name, rule_code, raw_value_desc) VALUES (?, ?, ?, ?, ?)",
-                             ("CLEAN_ODS_TO_DWD", appid, name, "FREE_GAME", f"is_free=1, price={price_usd}"))
-                rejected_b2 += 1
-                continue
-            if price_usd <= 0:
-                conn.execute("INSERT INTO etl_clean_error_log (job_name, appid, game_name, rule_code, raw_value_desc) VALUES (?, ?, ?, ?, ?)",
-                             ("CLEAN_ODS_TO_DWD", appid, name, "INVALID_PRICE", f"initial_price_usd={price_usd}"))
-                rejected_b2 += 1
-                continue
-            if tot_rev <= 0:
-                conn.execute("INSERT INTO etl_clean_error_log (job_name, appid, game_name, rule_code, raw_value_desc) VALUES (?, ?, ?, ?, ?)",
-                             ("CLEAN_ODS_TO_DWD", appid, name, "ZERO_REVIEWS", f"total_reviews={tot_rev}"))
-                rejected_b2 += 1
-                continue
-
-            k_val = players / tot_rev
-            p_tier = classify_price_tier(price_usd)
-            pos_tier = classify_pos_rate_tier(pos_rate)
-            conn.execute(
-                """
-                INSERT INTO dwd_steam_game_aligned VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (appid, name, rel_year, genre, price_usd, p_tier, tot_rev, tot_rev, 0, pos_rate, pos_tier,
-                 sch_ratio, avg_play_hrs, spy_min, charts_hrs, players, round(k_val, 4),
-                 round(math.log(k_val), 4), round(math.log(tot_rev), 4), round(math.log(price_usd), 4),
-                 "train_2018", snap_date, src_url)
-            )
-            loaded_b2 += 1
-
-        # 同时加载 2020+ 近年真值集与跨时代检验集进入 DWD 宽表（若跨时代游戏已在 2018 表中，用新 appid 偏移键 9000000+appid 存储其 2021-2023 跨时代状态，保持主键唯一且不丢失 2018 记录）
-        df_recent = pd.read_csv(BASE_DIR / "data/raw/recent_sales_truth_2020_2025.csv")
-        for _, r in df_recent.iterrows():
-            orig_appid = int(r["appid"])
-            cohort = "modern_2020" if r["era_type"] == "post_2020" else "cross_era"
-            dwd_appid = orig_appid if cohort == "modern_2020" else (9000000 + orig_appid)
-            display_name = r["name"] if cohort == "modern_2020" else f"{r['name']} (跨时代2020+检验)"
-            price_usd = float(r["price_usd"])
-            tot_rev = int(r["reviews_at_report"])
-            sales = int(r["reported_sales"])
-            k_val = sales / tot_rev
-            p_tier = classify_price_tier(price_usd)
-            pos_tier = classify_pos_rate_tier(float(r["positive_rate"]))
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO dwd_steam_game_aligned VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (dwd_appid, display_name, int(r["release_year"]), r["genre"], price_usd, p_tier,
-                 tot_rev, int(r["reviews_pre_2019"]), int(r["reviews_post_2019"]), float(r["positive_rate"]), pos_tier,
-                 float(r["schinese_ratio"]), float(r["avg_playtime_at_review_hrs"]), int(r["steamspy_avg_forever_min"]),
-                 int(r["steamcharts_total_player_hours"]), sales, round(k_val, 4),
-                 round(math.log(k_val), 4), round(math.log(tot_rev), 4), round(math.log(price_usd), 4),
-                 cohort, r["report_date"], r["source_url"])
-            )
-            loaded_b2 += 1
-
-        # 构建游戏维度表 dim_game
-        all_dwd = conn.execute("SELECT appid, name, genre, release_year, price_usd, price_tier, data_cohort FROM dwd_steam_game_aligned ORDER BY appid ASC").fetchall()
-        for g_key, g_row in enumerate(all_dwd, start=1):
-            appid, name, genre, rel_year, price_usd, p_tier, cohort = g_row
-            gid = genre_map.get(genre, 1)
-            is_cross = 1 if cohort == "cross_era" else 0
+        conn.execute("DELETE FROM dim_game;")
+        for key, (appid, name, genre, rel, yr, price, tier, indie) in enumerate(rows, start=1):
             conn.execute("INSERT INTO dim_game VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                         (g_key, appid, name, gid, rel_year, price_usd, p_tier, is_cross, cohort))
-
-        conn.execute(
-            "UPDATE etl_checkpoint SET last_processed_appid = ?, last_cursor = 'COMPLETED_ALL', status = 'COMPLETED', updated_at = CURRENT_TIMESTAMP WHERE job_name = 'CLEAN_ODS_TO_DWD';",
-            (last_appid_b2,)
-        )
-
-    log_etl_job(conn, "CLEAN_ODS_TO_DWD_RESUME", "2026-10-12", t1, len(remaining_rows) + len(df_recent), loaded_b2, rejected_b2, "SUCCESS",
-                f"从断点 appid>{resume_appid} 成功续传并完成全部清洗与维度构建")
+                         (key, appid, name, genre_map.get(genre, 10), yr, rel, price, tier, indie))
+    log_etl_job(conn, "DIM_GAME_BUILD", t0, len(rows), len(rows), 0, "SUCCESS", "按 appid 去重生成游戏维度")
 
 
+# ------------------------------------------------------------------------------
+# 步骤 4：价格维度 SCD Type 2（真实观测：档案馆历史存档 + 本次采集时的商店价格）
+# ------------------------------------------------------------------------------
 def apply_scd2_price_history(conn):
     """
-    步骤3：执行游戏价格维度 SCD Type 2 缓慢变化维拉链更新 (dim_price_scd2)
-    机制：对于按时间到达的价格变更事件，若该游戏已有 is_current=1 的记录且价格/折扣发生变化，
-    则先将旧记录的 effective_end 更新为本次变更日期、is_current 置为 0，再插入新版本 (version_no = 旧版本+1, is_current=1, effective_end='9999-12-31')。
+    按时间顺序回放价格观测：
+    - 这款游戏还没有当前版本 -> 插入 version 1；
+    - 价格或折扣和当前版本不同 -> 把当前版本的 effective_end 设为本次观测日、is_current=0，再插入新版本；
+    - 一样 -> 什么都不做（拉链表只在"变化"时开新版本）。
     """
     t0 = time.time()
-    df_sim_price = pd.read_csv(BASE_DIR / "data/simulated/sim_price_changes.csv")
+    obs = []
+    for appid, name, d, base, final, disc, url in conn.execute(
+            """SELECT appid, name, observed_date, base_price_usd, final_price_usd, discount_percent, archive_url
+               FROM ods_price_history_wayback ORDER BY appid, observed_date"""):
+        obs.append((appid, name, d, base, final, int(disc), "wayback_archive", url))
+    # 每款游戏再追加一条"本次采集时"的商店价格，作为最新观测
+    tracked = {o[0] for o in obs}
+    for appid, name, init_p, final_p, disc, fetched in conn.execute(
+            "SELECT appid, name, initial_price_usd, final_price_usd, discount_percent, fetched_at FROM ods_steam_appdetails"):
+        if appid in tracked and init_p:
+            obs.append((appid, name, fetched[:10], init_p, final_p, int(disc or 0), "store_api",
+                        f"https://store.steampowered.com/api/appdetails?appids={appid}&cc=us"))
+    obs.sort(key=lambda o: (o[0], o[2]))
+    loaded = 0
     with conn:
         conn.execute("DELETE FROM dim_price_scd2;")
-        loaded_cnt = 0
-        for _, r in df_sim_price.iterrows():
-            appid = int(r["appid"])
-            name = r["name"]
-            base_p = float(r["price_usd"])
-            disc = int(r["discount_pct"])
-            final_p = float(r["final_price_usd"])
-            c_date = r["change_date"]
-            ev_type = r["event_type"]
-            is_sim = int(r["is_simulated"])
-
-            curr = conn.execute(
-                "SELECT price_scd_key, final_price_usd, discount_percent, version_no FROM dim_price_scd2 WHERE appid = ? AND is_current = 1",
-                (appid,)
-            ).fetchone()
-
-            if curr is None:
+        for appid, name, d, base, final, disc, src, ref in obs:
+            cur = conn.execute(
+                "SELECT price_scd_key, base_price_usd, final_price_usd, discount_percent, version_no FROM dim_price_scd2 WHERE appid = ? AND is_current = 1",
+                (appid,)).fetchone()
+            if cur is None:
                 conn.execute(
-                    """
-                    INSERT INTO dim_price_scd2
-                    (appid, name, base_price_usd, discount_percent, final_price_usd, event_type, effective_start, effective_end, is_current, version_no, is_simulated)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, '9999-12-31', 1, 1, ?)
-                    """,
-                    (appid, name, base_p, disc, final_p, ev_type, c_date, is_sim)
-                )
-                loaded_cnt += 1
-            else:
-                old_key, old_final, old_disc, old_ver = curr
-                if abs(old_final - final_p) > 1e-4 or old_disc != disc:
-                    # 闭合旧版本
-                    conn.execute(
-                        "UPDATE dim_price_scd2 SET effective_end = ?, is_current = 0 WHERE price_scd_key = ?",
-                        (c_date, old_key)
-                    )
-                    # 插入新版本
-                    conn.execute(
-                        """
-                        INSERT INTO dim_price_scd2
-                        (appid, name, base_price_usd, discount_percent, final_price_usd, event_type, effective_start, effective_end, is_current, version_no, is_simulated)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, '9999-12-31', 1, ?, ?)
-                        """,
-                        (appid, name, base_p, disc, final_p, ev_type, c_date, old_ver + 1, is_sim)
-                    )
-                    loaded_cnt += 1
-
-    log_etl_job(conn, "SCD2_PRICE_DIMENSION_UPDATE", "2026-10-12", t0, len(df_sim_price), loaded_cnt, 0, "SUCCESS",
-                "SCD Type 2 价格维度拉链表构建完成（含历史闭合版本与当前生效版本）")
+                    """INSERT INTO dim_price_scd2 (appid, name, base_price_usd, discount_percent, final_price_usd,
+                       effective_start, effective_end, is_current, version_no, observation_source, source_ref)
+                       VALUES (?, ?, ?, ?, ?, ?, '9999-12-31', 1, 1, ?, ?)""", (appid, name, base, disc, final, d, src, ref))
+                loaded += 1
+            elif abs(cur[1] - base) > 1e-6 or abs(cur[2] - final) > 1e-6 or cur[3] != disc:
+                conn.execute("UPDATE dim_price_scd2 SET effective_end = ?, is_current = 0 WHERE price_scd_key = ?", (d, cur[0]))
+                conn.execute(
+                    """INSERT INTO dim_price_scd2 (appid, name, base_price_usd, discount_percent, final_price_usd,
+                       effective_start, effective_end, is_current, version_no, observation_source, source_ref)
+                       VALUES (?, ?, ?, ?, ?, ?, '9999-12-31', 1, ?, ?, ?)""",
+                    (appid, name, base, disc, final, d, cur[4] + 1, src, ref))
+                loaded += 1
+    log_etl_job(conn, "SCD2_PRICE_DIMENSION", t0, len(obs), loaded, 0, "SUCCESS",
+                f"{len(obs)} 条真实价格观测回放成 {loaded} 个价格版本")
 
 
-def extract_incremental_daily_snapshots(conn):
-    """
-    步骤4：基于 last_update_time 水位线的增量抽取演示 -> 周期快照事实表 (fact_daily_snapshot)
-    分两次增量拉取：第一次拉取 2026-10-01 至 2026-10-07，更新水位线；第二次只抽取 last_update_time > '2026-10-07 23:55:00' 的新增快照。
-    """
-    df_snap = pd.read_csv(BASE_DIR / "data/simulated/sim_daily_increments.csv")
-    with conn:
-        conn.execute("DELETE FROM fact_daily_snapshot;")
-        conn.execute("DELETE FROM etl_checkpoint WHERE job_name = 'INCR_DAILY_SNAPSHOT';")
-        conn.execute(
-            "INSERT INTO etl_checkpoint (job_name, last_processed_appid, last_cursor, last_update_time, status) VALUES ('INCR_DAILY_SNAPSHOT', 0, 'INIT', '2026-09-30 23:59:59', 'READY');"
-        )
-
-    # 第一批增量：抽取截至 2026-10-07 的数据
+# ------------------------------------------------------------------------------
+# 步骤 5：周期快照增量抽取（水位线 = 已入库的最大 fetched_at）
+# ------------------------------------------------------------------------------
+def incremental_snapshot_load(conn):
+    job = "INCR_SNAPSHOT"
     t0 = time.time()
-    watermark_1 = conn.execute("SELECT last_update_time FROM etl_checkpoint WHERE job_name = 'INCR_DAILY_SNAPSHOT'").fetchone()[0]
-    batch_1 = df_snap[(df_snap["last_update_time"] > watermark_1) & (df_snap["snapshot_date"] <= "2026-10-07")]
-    max_ts_1 = batch_1["last_update_time"].max()
+    snap_file = RAW_DIR / "snapshots.csv"
+    if not snap_file.exists():
+        log_etl_job(conn, job, t0, 0, 0, 0, "SKIPPED", "data/raw/snapshots.csv 不存在")
+        return
+    cp = conn.execute("SELECT last_update_time FROM etl_checkpoint WHERE job_name = ?", (job,)).fetchone()
+    watermark = cp[0] if cp and cp[0] else "1970-01-01 00:00:00"
+    df = pd.read_csv(snap_file)
+    new = df[df["fetched_at"] > watermark].sort_values(["appid", "fetched_at"])
+    loaded = 0
     with conn:
-        for _, r in batch_1.iterrows():
-            conn.execute(
-                """
-                INSERT INTO fact_daily_snapshot
-                (snapshot_date, appid, name, total_reviews, daily_new_reviews, current_players, discount_percent, final_price_usd, last_update_time, is_simulated)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (r["snapshot_date"], int(r["appid"]), r["name"], int(r["total_reviews"]), int(r["daily_new_reviews"]),
-                 int(r["current_players"]), int(r["discount_percent"]), float(r["final_price_usd"]), r["last_update_time"], int(r["is_simulated"]))
-            )
-        conn.execute("UPDATE etl_checkpoint SET last_update_time = ?, status = 'INCREMENTAL_SYNCED' WHERE job_name = 'INCR_DAILY_SNAPSHOT'", (max_ts_1,))
-    log_etl_job(conn, "INCR_DAILY_SNAPSHOT_BATCH1", "2026-10-07", t0, len(batch_1), len(batch_1), 0, "SUCCESS",
-                f"增量抽取第一周快照完成，水位线推进至 {max_ts_1}")
+        for r in new.to_dict("records"):
+            prev = conn.execute(
+                "SELECT total_reviews FROM fact_snapshot WHERE appid = ? AND fetched_at < ? ORDER BY fetched_at DESC LIMIT 1",
+                (int(r["appid"]), r["fetched_at"])).fetchone()
+            tot = none_if_nan(r["total_reviews"])
+            delta = (int(tot) - prev[0]) if (prev and prev[0] is not None and tot is not None) else None
+            cur = conn.execute(
+                """INSERT OR IGNORE INTO fact_snapshot (fetched_at, round_no, appid, name, current_players, total_reviews,
+                   new_reviews_since_prev, total_positive, final_price_usd, discount_percent, loaded_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (r["fetched_at"], int(r["round_no"]), int(r["appid"]), r["name"], none_if_nan(r["current_players"]),
+                 None if tot is None else int(tot), delta, none_if_nan(r["total_positive"]),
+                 none_if_nan(r["final_price"]), none_if_nan(r["discount_percent"]), now_str()))
+            loaded += cur.rowcount
+        new_wm = new["fetched_at"].max() if len(new) else watermark
+        conn.execute("INSERT OR REPLACE INTO etl_checkpoint VALUES (?, NULL, ?, 'INCREMENTAL_SYNCED', ?)", (job, new_wm, now_str()))
+    log_etl_job(conn, job, t0, len(new), loaded, 0, "SUCCESS", f"水位线 {watermark} -> {new_wm}，新增 {loaded} 行")
 
-    # 第二批增量：只抽取 last_update_time > max_ts_1 的数据
-    t1 = time.time()
-    watermark_2 = conn.execute("SELECT last_update_time FROM etl_checkpoint WHERE job_name = 'INCR_DAILY_SNAPSHOT'").fetchone()[0]
-    batch_2 = df_snap[df_snap["last_update_time"] > watermark_2]
-    max_ts_2 = batch_2["last_update_time"].max()
+
+# ------------------------------------------------------------------------------
+# 步骤 6：评测月度指数（政策上线判定结果入库）与 SQL 视图
+# ------------------------------------------------------------------------------
+def load_review_monthly_index(conn, policy):
+    t0 = time.time()
+    df = pd.read_csv(RAW_DIR / "review_monthly_index.csv")
     with conn:
-        for _, r in batch_2.iterrows():
-            conn.execute(
-                """
-                INSERT INTO fact_daily_snapshot
-                (snapshot_date, appid, name, total_reviews, daily_new_reviews, current_players, discount_percent, final_price_usd, last_update_time, is_simulated)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (r["snapshot_date"], int(r["appid"]), r["name"], int(r["total_reviews"]), int(r["daily_new_reviews"]),
-                 int(r["current_players"]), int(r["discount_percent"]), float(r["final_price_usd"]), r["last_update_time"], int(r["is_simulated"]))
-            )
-        conn.execute("UPDATE etl_checkpoint SET last_update_time = ?, status = 'COMPLETED' WHERE job_name = 'INCR_DAILY_SNAPSHOT'", (max_ts_2,))
-    log_etl_job(conn, "INCR_DAILY_SNAPSHOT_BATCH2", "2026-10-14", t1, len(batch_2), len(batch_2), 0, "SUCCESS",
-                f"增量抽取第二周快照完成，水位线从 {watermark_2} 推进至 {max_ts_2}")
+        conn.execute("DELETE FROM ads_review_monthly_index;")
+        for r in df.to_dict("records"):
+            conn.execute("INSERT INTO ads_review_monthly_index VALUES (?, ?, ?, ?, ?, ?)",
+                         (r["month"], r["median_index"], r["q25"], r["q75"], int(r["n_games"]),
+                          int(r["month"] == policy["policy_month"])))
+    log_etl_job(conn, "REVIEW_MONTHLY_INDEX", t0, len(df), len(df), 0, "SUCCESS",
+                f"判定政策月份 {policy['policy_month']}，前后评测指数 {policy['median_index_before']} -> {policy['median_index_after']}")
 
 
 def create_sql_views(conn):
-    """步骤5：在数据库中创建 SQL 模型视图与 FineBI 只读视图"""
-    sql_text = (BASE_DIR / "sql/02_views_and_models_mysql.sql").read_text(encoding="utf-8")
+    sql_text = (BASE_DIR / "sql" / "02_views_and_models_mysql.sql").read_text(encoding="utf-8")
     with conn:
         conn.executescript(sql_text)
 
 
-if __name__ == "__main__":
+def run_pipeline(demo_resume=False):
     conn = get_connection()
     init_dw_tables(conn)
-    load_ods_and_dimensions(conn)
-    clean_and_load_dwd_with_checkpoint(conn)
+    policy = load_policy()
+    load_ods(conn)
+    load_static_dims(conn, policy)
+    if demo_resume:
+        try:
+            clean_ods_to_dwd(conn, policy, crash_after_batches=3)
+        except SimulatedCrash as e:
+            print(f"[ETL] 演示中断：检查点停在 {e}，重新调用清洗步骤续跑……", flush=True)
+    clean_ods_to_dwd(conn, policy)
+    build_dim_game(conn)
     apply_scd2_price_history(conn)
-    extract_incremental_daily_snapshots(conn)
+    incremental_snapshot_load(conn)
+    load_review_monthly_index(conn, policy)
     create_sql_views(conn)
-
-    print("=== ETL 管道执行完成 ===")
-    for tbl in ["ods_leak_players_2018", "dwd_steam_game_aligned", "dim_game", "dim_price_scd2", "fact_daily_snapshot", "etl_job_log", "etl_checkpoint", "etl_clean_error_log"]:
-        cnt = conn.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()[0]
-        print(f"  表 {tbl:26s}: {cnt:4d} 行")
+    print("=== ETL 完成 ===")
+    for tbl in ["ods_ars_players_2018", "ods_steam_appdetails", "ods_steam_reviews_at_cutoff", "ods_steamcharts_monthly",
+                "ods_recent_sales_truth", "ods_price_history_wayback", "dwd_game_sample", "dim_game", "dim_price_scd2",
+                "fact_snapshot", "etl_clean_error_log", "etl_job_log"]:
+        print(f"  {tbl:30s} {conn.execute(f'SELECT COUNT(*) FROM {tbl}').fetchone()[0]:7d} 行")
+    for cohort, era, n, n_ok in conn.execute(
+            """SELECT cohort, era_group, COUNT(*), SUM(model_eligible) FROM dwd_game_sample GROUP BY cohort, era_group"""):
+        print(f"  样本 {cohort:10s} {era:12s} {n:5d} 条（可建模 {n_ok}）")
     conn.close()
+
+
+if __name__ == "__main__":
+    run_pipeline(demo_resume="--demo-resume" in sys.argv)

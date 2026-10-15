@@ -1,41 +1,123 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <job>
   <name>steam_etl_main</name>
-  <description>Steam游戏销量估算系统主ETL作业：串联清洗转换、SCD2价格拉链转换与SQL视图更新</description>
-  <job_version>1.0</job_version>
+  <description>主作业：清洗转换 -> SCD2 价格拉链转换 -> 执行 02 视图脚本</description>
+  <extended_description>前置条件：已按 README 用 sql/01 建好表并导入 04 数据；数据库连接 Steam_MySQL_DW 的密码需在 Spoon 里填写。</extended_description>
+  <job_version>2.0</job_version>
   <directory>/</directory>
+  <parameters/>
+  <connection>
+    <name>Steam_MySQL_DW</name>
+    <server>localhost</server>
+    <type>MYSQL</type>
+    <access>Native</access>
+    <database>steam_sales_dw</database>
+    <port>3306</port>
+    <username>root</username>
+    <password>Encrypted </password>
+    <servername/>
+    <data_tablespace/>
+    <index_tablespace/>
+    <attributes>
+      <attribute><code>PORT_NUMBER</code><attribute>3306</attribute></attribute>
+      <attribute><code>EXTRA_OPTION_MYSQL.characterEncoding</code><attribute>utf8</attribute></attribute>
+      <attribute><code>EXTRA_OPTION_MYSQL.serverTimezone</code><attribute>Asia/Shanghai</attribute></attribute>
+    </attributes>
+  </connection>
   <entries>
     <entry>
       <name>START</name>
+      <description/>
       <type>SPECIAL</type>
       <start>Y</start>
+      <dummy>N</dummy>
+      <repeat>N</repeat>
+      <schedulerType>0</schedulerType>
+      <intervalSeconds>0</intervalSeconds>
+      <intervalMinutes>60</intervalMinutes>
+      <hour>12</hour>
+      <minutes>0</minutes>
+      <weekDay>1</weekDay>
+      <DayOfMonth>1</DayOfMonth>
       <parallel>N</parallel>
+      <draw>Y</draw>
+      <nr>0</nr>
+      <xloc>60</xloc>
+      <yloc>100</yloc>
     </entry>
     <entry>
-      <name>执行转换_清洗与对齐Steam游戏数据</name>
+      <name>转换_清洗2018样本</name>
+      <description/>
       <type>TRANS</type>
+      <specification_method>filename</specification_method>
       <filename>${Internal.Entry.Current.Directory}/clean_steam_games.ktr</filename>
+      <params_from_previous>N</params_from_previous>
+      <exec_per_row>N</exec_per_row>
+      <clear_rows>N</clear_rows>
+      <clear_files>N</clear_files>
+      <set_logfile>N</set_logfile>
+      <wait_until_finished>Y</wait_until_finished>
+      <follow_abort_remote>N</follow_abort_remote>
+      <create_parent_folder>N</create_parent_folder>
+      <loglevel>Basic</loglevel>
+      <parallel>N</parallel>
+      <draw>Y</draw>
+      <nr>0</nr>
+      <xloc>240</xloc>
+      <yloc>100</yloc>
     </entry>
     <entry>
-      <name>执行转换_更新SCD2价格历史拉链表</name>
+      <name>转换_SCD2价格拉链</name>
+      <description/>
       <type>TRANS</type>
+      <specification_method>filename</specification_method>
       <filename>${Internal.Entry.Current.Directory}/scd2_price_history.ktr</filename>
+      <params_from_previous>N</params_from_previous>
+      <exec_per_row>N</exec_per_row>
+      <clear_rows>N</clear_rows>
+      <clear_files>N</clear_files>
+      <set_logfile>N</set_logfile>
+      <wait_until_finished>Y</wait_until_finished>
+      <follow_abort_remote>N</follow_abort_remote>
+      <create_parent_folder>N</create_parent_folder>
+      <loglevel>Basic</loglevel>
+      <parallel>N</parallel>
+      <draw>Y</draw>
+      <nr>0</nr>
+      <xloc>440</xloc>
+      <yloc>100</yloc>
     </entry>
     <entry>
-      <name>执行SQL脚本_刷新M0_M1与FineBI视图</name>
+      <name>SQL_刷新视图</name>
+      <description>执行 sql/02_views_and_models_mysql.sql（DROP VIEW + CREATE VIEW）</description>
       <type>SQL</type>
-      <sqlfromfile>Y</sqlfromfile>
+      <sql/>
+      <useVariableSubstitution>F</useVariableSubstitution>
+      <sqlfromfile>T</sqlfromfile>
       <sqlfilename>${Internal.Entry.Current.Directory}/../sql/02_views_and_models_mysql.sql</sqlfilename>
+      <sendOneStatement>F</sendOneStatement>
+      <connection>Steam_MySQL_DW</connection>
+      <parallel>N</parallel>
+      <draw>Y</draw>
+      <nr>0</nr>
+      <xloc>640</xloc>
+      <yloc>100</yloc>
     </entry>
     <entry>
-      <name>成功完成</name>
+      <name>成功</name>
+      <description/>
       <type>SUCCESS</type>
+      <parallel>N</parallel>
+      <draw>Y</draw>
+      <nr>0</nr>
+      <xloc>820</xloc>
+      <yloc>100</yloc>
     </entry>
   </entries>
   <hops>
-    <hop><from>START</from><to>执行转换_清洗与对齐Steam游戏数据</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>Y</unconditional></hop>
-    <hop><from>执行转换_清洗与对齐Steam游戏数据</from><to>执行转换_更新SCD2价格历史拉链表</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>N</unconditional></hop>
-    <hop><from>执行转换_更新SCD2价格历史拉链表</from><to>执行SQL脚本_刷新M0_M1与FineBI视图</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>N</unconditional></hop>
-    <hop><from>执行SQL脚本_刷新M0_M1与FineBI视图</from><to>成功完成</to><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>N</unconditional></hop>
+    <hop><from>START</from><to>转换_清洗2018样本</to><from_nr>0</from_nr><to_nr>0</to_nr><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>Y</unconditional></hop>
+    <hop><from>转换_清洗2018样本</from><to>转换_SCD2价格拉链</to><from_nr>0</from_nr><to_nr>0</to_nr><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>N</unconditional></hop>
+    <hop><from>转换_SCD2价格拉链</from><to>SQL_刷新视图</to><from_nr>0</from_nr><to_nr>0</to_nr><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>N</unconditional></hop>
+    <hop><from>SQL_刷新视图</from><to>成功</to><from_nr>0</from_nr><to_nr>0</to_nr><enabled>Y</enabled><evaluation>Y</evaluation><unconditional>N</unconditional></hop>
   </hops>
 </job>

@@ -2,11 +2,21 @@
 <transformation>
   <info>
     <name>clean_steam_games</name>
-    <description>Steam原始数据清洗与对齐转换：过滤免费游戏、Demo、非游戏软件与异常价格，计算实测系数k</description>
-    <extended_description>课程大作业：基于ETL的Steam游戏销量估算与智能分析系统</extended_description>
-    <trans_version>1.0</trans_version>
+    <description>2018 训练样本清洗（Kettle 版）：关联泄露玩家数与商店详情，过滤免费/非游戏/无价格/零评测，计算 k</description>
+    <extended_description>读取 crawler.py export 产出的真实 CSV。结果写 stg_kettle_train_clean，被拦截的写 etl_clean_error_log。Python 版见 src/etl_pipeline.py。</extended_description>
+    <trans_version>2.0</trans_version>
     <trans_type>Normal</trans_type>
     <directory>/</directory>
+    <parameters/>
+    <log/>
+    <maxdate/>
+    <size_rowset>10000</size_rowset>
+    <sleep_time_empty>50</sleep_time_empty>
+    <sleep_time_full>50</sleep_time_full>
+    <unique_connections>N</unique_connections>
+    <feedback_shown>Y</feedback_shown>
+    <feedback_size>50000</feedback_size>
+    <using_thread_priorities>Y</using_thread_priorities>
   </info>
   <connection>
     <name>Steam_MySQL_DW</name>
@@ -16,95 +26,321 @@
     <database>steam_sales_dw</database>
     <port>3306</port>
     <username>root</username>
-    <password>Encrypted 2be98afc86aa7f2e4cb79ce10cc9da0ce</password>
+    <password>Encrypted </password>
+    <servername/>
+    <data_tablespace/>
+    <index_tablespace/>
+    <attributes>
+      <attribute><code>PORT_NUMBER</code><attribute>3306</attribute></attribute>
+      <attribute><code>EXTRA_OPTION_MYSQL.characterEncoding</code><attribute>utf8</attribute></attribute>
+      <attribute><code>EXTRA_OPTION_MYSQL.serverTimezone</code><attribute>Asia/Shanghai</attribute></attribute>
+    </attributes>
   </connection>
   <order>
-    <hop>
-      <from>CSV文件输入_2018玩家快照与评测表</from>
-      <to>过滤记录_剔除免费游戏与Demo及异常值</to>
-      <enabled>Y</enabled>
-    </hop>
-    <hop>
-      <from>过滤记录_剔除免费游戏与Demo及异常值</from>
-      <to>计算器_求解实测系数k与对数特征</to>
-      <enabled>Y</enabled>
-    </hop>
-    <hop>
-      <from>过滤记录_剔除免费游戏与Demo及异常值</from>
-      <to>表输出_清洗异常审计日志表(etl_clean_error_log)</to>
-      <enabled>Y</enabled>
-    </hop>
-    <hop>
-      <from>计算器_求解实测系数k与对数特征</from>
-      <to>表输出_明细层宽表(dwd_steam_game_aligned)</to>
-      <enabled>Y</enabled>
-    </hop>
+    <hop><from>CSV_评测汇总</from><to>过滤_只要2018样本</to><enabled>Y</enabled></hop>
+    <hop><from>过滤_只要2018样本</from><to>查找_泄露玩家数</to><enabled>Y</enabled></hop>
+    <hop><from>CSV_泄露玩家数</from><to>查找_泄露玩家数</to><enabled>Y</enabled></hop>
+    <hop><from>查找_泄露玩家数</from><to>查找_商店详情</to><enabled>Y</enabled></hop>
+    <hop><from>CSV_商店详情</from><to>查找_商店详情</to><enabled>Y</enabled></hop>
+    <hop><from>查找_商店详情</from><to>过滤_付费游戏且有评测</to><enabled>Y</enabled></hop>
+    <hop><from>过滤_付费游戏且有评测</from><to>计算_k与好评率</to><enabled>Y</enabled></hop>
+    <hop><from>过滤_付费游戏且有评测</from><to>常量_拦截标记</to><enabled>Y</enabled></hop>
+    <hop><from>计算_k与好评率</from><to>输出_stg_kettle_train_clean</to><enabled>Y</enabled></hop>
+    <hop><from>常量_拦截标记</from><to>输出_etl_clean_error_log</to><enabled>Y</enabled></hop>
   </order>
+
   <step>
-    <name>CSV文件输入_2018玩家快照与评测表</name>
+    <name>CSV_评测汇总</name>
     <type>CsvInput</type>
-    <description>读取2018-07-01对齐的玩家数与评测统计CSV文件</description>
-    <filename>${Internal.Entry.Current.Directory}/../data/raw/games_achievements_players_2018-07-01.csv</filename>
-    <delimiter>,</delimiter>
+    <description>data/raw/steam_reviews_at_cutoff.csv（只用 cohort=train_2018 的行，在过滤步骤里筛）</description>
+    <distribute>Y</distribute>
+    <custom_distribution/>
+    <copies>1</copies>
+    <partitioning><method>none</method><schema_name/></partitioning>
+    <filename>${Internal.Entry.Current.Directory}/../data/raw/steam_reviews_at_cutoff.csv</filename>
+    <filename_field/>
+    <rownum_field/>
+    <include_filename>N</include_filename>
+    <separator>,</separator>
     <enclosure>"</enclosure>
     <header>Y</header>
+    <buffer_size>50000</buffer_size>
+    <lazy_conversion>N</lazy_conversion>
+    <add_filename_result>N</add_filename_result>
+    <parallel>N</parallel>
+    <newline_possible>N</newline_possible>
     <encoding>UTF-8</encoding>
     <fields>
-      <field><name>appid</name><type>Integer</type></field>
-      <field><name>name</name><type>String</type></field>
-      <field><name>players_2018_07_01</name><type>Integer</type></field>
-      <field><name>is_free</name><type>Integer</type></field>
-      <field><name>app_type</name><type>String</type></field>
-      <field><name>price_usd</name><type>Number</type></field>
-      <field><name>total_reviews_2018</name><type>Integer</type></field>
+      <field><name>appid</name><type>Integer</type><format/><currency/><decimal/><group/><length>15</length><precision>0</precision><trim_type>both</trim_type></field>
+      <field><name>cohort</name><type>String</type><format/><currency/><decimal/><group/><length>-1</length><precision>-1</precision><trim_type>both</trim_type></field>
+      <field><name>cutoff_date</name><type>String</type><format/><currency/><decimal/><group/><length>-1</length><precision>-1</precision><trim_type>both</trim_type></field>
+      <field><name>cutoff_ts</name><type>Integer</type><format/><currency/><decimal/><group/><length>15</length><precision>0</precision><trim_type>both</trim_type></field>
+      <field><name>total_reviews</name><type>Integer</type><format/><currency/><decimal/><group/><length>15</length><precision>0</precision><trim_type>both</trim_type></field>
+      <field><name>total_positive</name><type>Integer</type><format/><currency/><decimal/><group/><length>15</length><precision>0</precision><trim_type>both</trim_type></field>
+      <field><name>total_negative</name><type>Integer</type><format/><currency/><decimal/><group/><length>15</length><precision>0</precision><trim_type>both</trim_type></field>
+      <field><name>schinese_reviews</name><type>Integer</type><format/><currency/><decimal/><group/><length>15</length><precision>0</precision><trim_type>both</trim_type></field>
+      <field><name>steam_purchase_reviews</name><type>Integer</type><format/><currency/><decimal/><group/><length>15</length><precision>0</precision><trim_type>both</trim_type></field>
+      <field><name>reviews_before_policy</name><type>String</type><format/><currency/><decimal/><group/><length>-1</length><precision>-1</precision><trim_type>both</trim_type></field>
+      <field><name>sample_n</name><type>Integer</type><format/><currency/><decimal/><group/><length>15</length><precision>0</precision><trim_type>both</trim_type></field>
+      <field><name>sample_median_playtime_at_review_hrs</name><type>Number</type><format/><currency/><decimal>.</decimal><group/><length>-1</length><precision>-1</precision><trim_type>both</trim_type></field>
+      <field><name>sample_mean_playtime_at_review_hrs</name><type>Number</type><format/><currency/><decimal>.</decimal><group/><length>-1</length><precision>-1</precision><trim_type>both</trim_type></field>
+      <field><name>fetched_at</name><type>String</type><format/><currency/><decimal/><group/><length>-1</length><precision>-1</precision><trim_type>both</trim_type></field>
     </fields>
+    <GUI><xloc>80</xloc><yloc>80</yloc><draw>Y</draw></GUI>
   </step>
+
   <step>
-    <name>过滤记录_剔除免费游戏与Demo及异常值</name>
+    <name>CSV_泄露玩家数</name>
+    <type>CsvInput</type>
+    <description>data/raw/ars_players_2018.csv（原文件有 6 组重复行，流查找取到哪条都一样）</description>
+    <distribute>Y</distribute>
+    <custom_distribution/>
+    <copies>1</copies>
+    <partitioning><method>none</method><schema_name/></partitioning>
+    <filename>${Internal.Entry.Current.Directory}/../data/raw/ars_players_2018.csv</filename>
+    <filename_field/>
+    <rownum_field/>
+    <include_filename>N</include_filename>
+    <separator>,</separator>
+    <enclosure>"</enclosure>
+    <header>Y</header>
+    <buffer_size>50000</buffer_size>
+    <lazy_conversion>N</lazy_conversion>
+    <add_filename_result>N</add_filename_result>
+    <parallel>N</parallel>
+    <newline_possible>N</newline_possible>
+    <encoding>UTF-8</encoding>
+    <fields>
+      <field><name>appid</name><type>Integer</type><format/><currency/><decimal/><group/><length>15</length><precision>0</precision><trim_type>both</trim_type></field>
+      <field><name>title</name><type>String</type><format/><currency/><decimal/><group/><length>-1</length><precision>-1</precision><trim_type>both</trim_type></field>
+      <field><name>players</name><type>Integer</type><format/><currency/><decimal/><group/><length>15</length><precision>0</precision><trim_type>both</trim_type></field>
+    </fields>
+    <GUI><xloc>80</xloc><yloc>240</yloc><draw>Y</draw></GUI>
+  </step>
+
+  <step>
+    <name>CSV_商店详情</name>
+    <type>CsvInput</type>
+    <description>data/raw/steam_appdetails.csv（只读用到的前几列，其余列忽略）</description>
+    <distribute>Y</distribute>
+    <custom_distribution/>
+    <copies>1</copies>
+    <partitioning><method>none</method><schema_name/></partitioning>
+    <filename>${Internal.Entry.Current.Directory}/../data/raw/steam_appdetails.csv</filename>
+    <filename_field/>
+    <rownum_field/>
+    <include_filename>N</include_filename>
+    <separator>,</separator>
+    <enclosure>"</enclosure>
+    <header>Y</header>
+    <buffer_size>50000</buffer_size>
+    <lazy_conversion>N</lazy_conversion>
+    <add_filename_result>N</add_filename_result>
+    <parallel>N</parallel>
+    <newline_possible>Y</newline_possible>
+    <encoding>UTF-8</encoding>
+    <fields>
+      <field><name>appid</name><type>Integer</type><format/><currency/><decimal/><group/><length>15</length><precision>0</precision><trim_type>both</trim_type></field>
+      <field><name>success</name><type>Integer</type><format/><currency/><decimal/><group/><length>15</length><precision>0</precision><trim_type>both</trim_type></field>
+      <field><name>name</name><type>String</type><format/><currency/><decimal/><group/><length>-1</length><precision>-1</precision><trim_type>both</trim_type></field>
+      <field><name>app_type</name><type>String</type><format/><currency/><decimal/><group/><length>-1</length><precision>-1</precision><trim_type>both</trim_type></field>
+      <field><name>is_free</name><type>Integer</type><format/><currency/><decimal/><group/><length>15</length><precision>0</precision><trim_type>both</trim_type></field>
+      <field><name>release_date_text</name><type>String</type><format/><currency/><decimal/><group/><length>-1</length><precision>-1</precision><trim_type>both</trim_type></field>
+      <field><name>release_date</name><type>String</type><format/><currency/><decimal/><group/><length>-1</length><precision>-1</precision><trim_type>both</trim_type></field>
+      <field><name>currency</name><type>String</type><format/><currency/><decimal/><group/><length>-1</length><precision>-1</precision><trim_type>both</trim_type></field>
+      <field><name>initial_price_usd</name><type>Number</type><format/><currency/><decimal>.</decimal><group/><length>-1</length><precision>-1</precision><trim_type>both</trim_type></field>
+    </fields>
+    <GUI><xloc>320</xloc><yloc>240</yloc><draw>Y</draw></GUI>
+  </step>
+
+  <step>
+    <name>过滤_只要2018样本</name>
     <type>FilterRows</type>
-    <description>条件：is_free = 0 AND app_type = 'game' AND price_usd > 0 AND total_reviews_2018 > 0</description>
-    <send_true_to>计算器_求解实测系数k与对数特征</send_true_to>
-    <send_false_to>表输出_清洗异常审计日志表(etl_clean_error_log)</send_false_to>
+    <description>同一个 CSV 里还有真值集的行（cohort=truth），这里直接丢弃，不算清洗拦截</description>
+    <distribute>Y</distribute>
+    <custom_distribution/>
+    <copies>1</copies>
+    <partitioning><method>none</method><schema_name/></partitioning>
+    <send_true_to>查找_泄露玩家数</send_true_to>
+    <send_false_to/>
+    <compare>
+      <condition><negated>N</negated><leftvalue>cohort</leftvalue><function>=</function><rightvalue/><value><name>constant</name><type>String</type><text>train_2018</text><length>-1</length><precision>-1</precision><isnull>N</isnull><mask/></value></condition>
+    </compare>
+    <GUI><xloc>80</xloc><yloc>160</yloc><draw>Y</draw></GUI>
+  </step>
+
+  <step>
+    <name>查找_泄露玩家数</name>
+    <type>StreamLookup</type>
+    <description>按 appid 从泄露表取 players；查不到的 players 为空，会在过滤步骤被拦下</description>
+    <distribute>Y</distribute>
+    <custom_distribution/>
+    <copies>1</copies>
+    <partitioning><method>none</method><schema_name/></partitioning>
+    <from>CSV_泄露玩家数</from>
+    <input_sorted>N</input_sorted>
+    <preserve_memory>Y</preserve_memory>
+    <sorted_list>N</sorted_list>
+    <integer_pair>N</integer_pair>
+    <lookup>
+      <key><name>appid</name><field>appid</field></key>
+      <value><name>players</name><rename>players</rename><default/><type>Integer</type></value>
+    </lookup>
+    <GUI><xloc>200</xloc><yloc>160</yloc><draw>Y</draw></GUI>
+  </step>
+
+  <step>
+    <name>查找_商店详情</name>
+    <type>StreamLookup</type>
+    <description>按 appid 取名称、类型、是否免费、价格、发售日</description>
+    <distribute>Y</distribute>
+    <custom_distribution/>
+    <copies>1</copies>
+    <partitioning><method>none</method><schema_name/></partitioning>
+    <from>CSV_商店详情</from>
+    <input_sorted>N</input_sorted>
+    <preserve_memory>Y</preserve_memory>
+    <sorted_list>N</sorted_list>
+    <integer_pair>N</integer_pair>
+    <lookup>
+      <key><name>appid</name><field>appid</field></key>
+      <value><name>name</name><rename>name</rename><default/><type>String</type></value>
+      <value><name>app_type</name><rename>app_type</rename><default/><type>String</type></value>
+      <value><name>is_free</name><rename>is_free</rename><default>1</default><type>Integer</type></value>
+      <value><name>initial_price_usd</name><rename>price_usd</rename><default>0</default><type>Number</type></value>
+      <value><name>release_date</name><rename>release_date</rename><default/><type>String</type></value>
+    </lookup>
+    <GUI><xloc>320</xloc><yloc>160</yloc><draw>Y</draw></GUI>
+  </step>
+
+  <step>
+    <name>过滤_付费游戏且有评测</name>
+    <type>FilterRows</type>
+    <description>players 非空 且 app_type=game 且 is_free=0 且 price_usd&gt;0 且 total_reviews&gt;0 且 release_date&lt;=2018-07-01</description>
+    <distribute>Y</distribute>
+    <custom_distribution/>
+    <copies>1</copies>
+    <partitioning><method>none</method><schema_name/></partitioning>
+    <send_true_to>计算_k与好评率</send_true_to>
+    <send_false_to>常量_拦截标记</send_false_to>
     <compare>
       <condition>
         <negated>N</negated>
         <conditions>
-          <condition><leftvalue>is_free</leftvalue><function>=</function><rightvalue/><value><name>constant</name><type>Integer</type><text>0</text></value></condition>
-          <condition><operator>AND</operator><leftvalue>app_type</leftvalue><function>=</function><rightvalue/><value><name>constant</name><type>String</type><text>game</text></value></condition>
-          <condition><operator>AND</operator><leftvalue>price_usd</leftvalue><function>&gt;</function><rightvalue/><value><name>constant</name><type>Number</type><text>0.0</text></value></condition>
-          <condition><operator>AND</operator><leftvalue>total_reviews_2018</leftvalue><function>&gt;</function><rightvalue/><value><name>constant</name><type>Integer</type><text>0</text></value></condition>
+          <condition><negated>N</negated><leftvalue>players</leftvalue><function>IS NOT NULL</function><rightvalue/></condition>
+          <condition><negated>N</negated><operator>AND</operator><leftvalue>app_type</leftvalue><function>=</function><rightvalue/><value><name>constant</name><type>String</type><text>game</text><length>-1</length><precision>-1</precision><isnull>N</isnull><mask/></value></condition>
+          <condition><negated>N</negated><operator>AND</operator><leftvalue>is_free</leftvalue><function>=</function><rightvalue/><value><name>constant</name><type>Integer</type><text>0</text><length>-1</length><precision>0</precision><isnull>N</isnull><mask>####0;-####0</mask></value></condition>
+          <condition><negated>N</negated><operator>AND</operator><leftvalue>price_usd</leftvalue><function>&gt;</function><rightvalue/><value><name>constant</name><type>Number</type><text>0</text><length>-1</length><precision>-1</precision><isnull>N</isnull><mask/></value></condition>
+          <condition><negated>N</negated><operator>AND</operator><leftvalue>total_reviews</leftvalue><function>&gt;</function><rightvalue/><value><name>constant</name><type>Integer</type><text>0</text><length>-1</length><precision>0</precision><isnull>N</isnull><mask>####0;-####0</mask></value></condition>
+          <condition><negated>N</negated><operator>AND</operator><leftvalue>release_date</leftvalue><function>&lt;=</function><rightvalue/><value><name>constant</name><type>String</type><text>2018-07-01</text><length>-1</length><precision>-1</precision><isnull>N</isnull><mask/></value></condition>
         </conditions>
       </condition>
     </compare>
+    <GUI><xloc>560</xloc><yloc>160</yloc><draw>Y</draw></GUI>
   </step>
+
   <step>
-    <name>计算器_求解实测系数k与对数特征</name>
+    <name>计算_k与好评率</name>
     <type>Calculator</type>
-    <description>计算 k_ratio = players_2018_07_01 / total_reviews_2018</description>
-    <calculation>
-      <field_name>k_ratio</field_name>
-      <calc_type>DIVIDE</calc_type>
-      <field_a>players_2018_07_01</field_a>
-      <field_b>total_reviews_2018</field_b>
-      <value_type>Number</value_type>
-    </calculation>
+    <description>k = 玩家数 / 评测数；好评率 = 好评 / 评测数</description>
+    <distribute>Y</distribute>
+    <custom_distribution/>
+    <copies>1</copies>
+    <partitioning><method>none</method><schema_name/></partitioning>
+    <calculation><field_name>k_ratio</field_name><calc_type>DIVIDE</calc_type><field_a>players</field_a><field_b>total_reviews</field_b><field_c/><value_type>Number</value_type><value_length>-1</value_length><value_precision>-1</value_precision><remove>N</remove><conversion_mask/><decimal_symbol/><grouping_symbol/><currency_symbol/></calculation>
+    <calculation><field_name>positive_rate</field_name><calc_type>DIVIDE</calc_type><field_a>total_positive</field_a><field_b>total_reviews</field_b><field_c/><value_type>Number</value_type><value_length>-1</value_length><value_precision>-1</value_precision><remove>N</remove><conversion_mask/><decimal_symbol/><grouping_symbol/><currency_symbol/></calculation>
+    <GUI><xloc>800</xloc><yloc>80</yloc><draw>Y</draw></GUI>
   </step>
+
   <step>
-    <name>表输出_明细层宽表(dwd_steam_game_aligned)</name>
+    <name>输出_stg_kettle_train_clean</name>
     <type>TableOutput</type>
+    <description>Kettle 版清洗结果（与 Python 版 dwd_game_sample 的 train_2018 部分对照）</description>
+    <distribute>Y</distribute>
+    <custom_distribution/>
+    <copies>1</copies>
+    <partitioning><method>none</method><schema_name/></partitioning>
     <connection>Steam_MySQL_DW</connection>
-    <table>dwd_steam_game_aligned</table>
+    <schema/>
+    <table>stg_kettle_train_clean</table>
+    <commit>1000</commit>
+    <truncate>Y</truncate>
+    <ignore_errors>N</ignore_errors>
+    <use_batch>Y</use_batch>
+    <specify_fields>Y</specify_fields>
+    <partitioning_enabled>N</partitioning_enabled>
+    <partitioning_field/>
+    <partitioning_daily>N</partitioning_daily>
+    <partitioning_monthly>Y</partitioning_monthly>
+    <tablename_in_field>N</tablename_in_field>
+    <tablename_field/>
+    <tablename_in_table>Y</tablename_in_table>
+    <return_keys>N</return_keys>
+    <return_field/>
+    <fields>
+      <field><column_name>appid</column_name><stream_name>appid</stream_name></field>
+      <field><column_name>name</column_name><stream_name>name</stream_name></field>
+      <field><column_name>release_date</column_name><stream_name>release_date</stream_name></field>
+      <field><column_name>price_usd</column_name><stream_name>price_usd</stream_name></field>
+      <field><column_name>players</column_name><stream_name>players</stream_name></field>
+      <field><column_name>total_reviews</column_name><stream_name>total_reviews</stream_name></field>
+      <field><column_name>positive_rate</column_name><stream_name>positive_rate</stream_name></field>
+      <field><column_name>k_ratio</column_name><stream_name>k_ratio</stream_name></field>
+    </fields>
+    <GUI><xloc>1040</xloc><yloc>80</yloc><draw>Y</draw></GUI>
+  </step>
+
+  <step>
+    <name>常量_拦截标记</name>
+    <type>Constant</type>
+    <description>给被拦截的行补上日志表需要的固定字段</description>
+    <distribute>Y</distribute>
+    <custom_distribution/>
+    <copies>1</copies>
+    <partitioning><method>none</method><schema_name/></partitioning>
+    <fields>
+      <field><name>job_name</name><type>String</type><format/><currency/><decimal/><group/><nullif>KETTLE_CLEAN_TRAIN_2018</nullif><length>-1</length><precision>-1</precision><set_empty_string>N</set_empty_string></field>
+      <field><name>rule_code</name><type>String</type><format/><currency/><decimal/><group/><nullif>KETTLE_FILTER_REJECT</nullif><length>-1</length><precision>-1</precision><set_empty_string>N</set_empty_string></field>
+      <field><name>clean_action</name><type>String</type><format/><currency/><decimal/><group/><nullif>FILTERED_OUT</nullif><length>-1</length><precision>-1</precision><set_empty_string>N</set_empty_string></field>
+      <field><name>raw_value_desc</name><type>String</type><format/><currency/><decimal/><group/><nullif>不满足：有泄露玩家数/付费/game/有价格/有评测/发售日不晚于截止日 之一</nullif><length>-1</length><precision>-1</precision><set_empty_string>N</set_empty_string></field>
+    </fields>
+    <GUI><xloc>800</xloc><yloc>240</yloc><draw>Y</draw></GUI>
+  </step>
+
+  <step>
+    <name>输出_etl_clean_error_log</name>
+    <type>TableOutput</type>
+    <description>拦截记录写入清洗审计表</description>
+    <distribute>Y</distribute>
+    <custom_distribution/>
+    <copies>1</copies>
+    <partitioning><method>none</method><schema_name/></partitioning>
+    <connection>Steam_MySQL_DW</connection>
+    <schema/>
+    <table>etl_clean_error_log</table>
     <commit>1000</commit>
     <truncate>N</truncate>
+    <ignore_errors>N</ignore_errors>
     <use_batch>Y</use_batch>
-  </step>
-  <step>
-    <name>表输出_清洗异常审计日志表(etl_clean_error_log)</name>
-    <type>TableOutput</type>
-    <connection>Steam_MySQL_DW</connection>
-    <table>etl_clean_error_log</table>
-    <commit>500</commit>
-    <truncate>N</truncate>
-    <use_batch>Y</use_batch>
+    <specify_fields>Y</specify_fields>
+    <partitioning_enabled>N</partitioning_enabled>
+    <partitioning_field/>
+    <partitioning_daily>N</partitioning_daily>
+    <partitioning_monthly>Y</partitioning_monthly>
+    <tablename_in_field>N</tablename_in_field>
+    <tablename_field/>
+    <tablename_in_table>Y</tablename_in_table>
+    <return_keys>N</return_keys>
+    <return_field/>
+    <fields>
+      <field><column_name>job_name</column_name><stream_name>job_name</stream_name></field>
+      <field><column_name>appid</column_name><stream_name>appid</stream_name></field>
+      <field><column_name>cohort</column_name><stream_name>cohort</stream_name></field>
+      <field><column_name>game_name</column_name><stream_name>name</stream_name></field>
+      <field><column_name>rule_code</column_name><stream_name>rule_code</stream_name></field>
+      <field><column_name>raw_value_desc</column_name><stream_name>raw_value_desc</stream_name></field>
+      <field><column_name>clean_action</column_name><stream_name>clean_action</stream_name></field>
+    </fields>
+    <GUI><xloc>1040</xloc><yloc>240</yloc><draw>Y</draw></GUI>
   </step>
 </transformation>

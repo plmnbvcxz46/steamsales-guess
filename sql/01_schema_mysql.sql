@@ -1,279 +1,205 @@
--- 基于 ETL 的 Steam 游戏销量估算与智能分析系统 - 三层架构与星型模型 DDL (MySQL 8.0+)
+-- =============================================================================
+-- 基于 ETL 的 Steam 游戏销量估算系统：三层数据仓库 + 星型模型 DDL（MySQL 8.0）
+-- 与 src/etl_pipeline.py 里的 SQLite 表结构一一对应。导入顺序：
+--   01_schema_mysql.sql -> 04_full_data_dump_mysql.sql -> 02_views_and_models_mysql.sql -> 03_index_explain_mysql.sql
+-- =============================================================================
 CREATE DATABASE IF NOT EXISTS steam_sales_dw DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 USE steam_sales_dw;
 
-DROP TABLE IF EXISTS ods_leak_players_2018;
-CREATE TABLE ods_leak_players_2018 (
-    appid INT PRIMARY KEY COMMENT 'Steam 应用唯一编号',
-    name VARCHAR(255) NOT NULL COMMENT '游戏/应用原始名称',
-    players_2018_07_01 BIGINT NOT NULL COMMENT '2018-07-01 成就接口反推真实玩家数',
-    snapshot_date DATE NOT NULL COMMENT '快照日期 (2018-07-01)',
-    source_url VARCHAR(500) COMMENT '数据来源归档链接',
-    loaded_at DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '入库时间'
-) ENGINE=InnoDB COMMENT='原始层：2018年Ars Technica成就泄露玩家数快照表';
+SET FOREIGN_KEY_CHECKS = 0;
+DROP TABLE IF EXISTS fact_sales_estimation, fact_snapshot, dwd_game_sample, dim_game, dim_price_scd2,
+    dim_estimation_method, dim_release_date, dim_genre, ads_review_monthly_index, ads_model_eval_summary,
+    ads_feature_importance, ads_policy_calibration, etl_job_log, etl_checkpoint, etl_clean_error_log,
+    ods_ars_players_2018, ods_steam_appdetails, ods_steam_reviews_at_cutoff, ods_steamcharts_monthly,
+    ods_recent_sales_truth, ods_price_history_wayback, ods_review_monthly_policy_scan,
+    stg_kettle_train_clean, dim_price_scd2_kettle;
+SET FOREIGN_KEY_CHECKS = 1;
 
-DROP TABLE IF EXISTS ods_steam_appdetails;
-CREATE TABLE ods_steam_appdetails (
-    appid INT PRIMARY KEY COMMENT 'Steam 应用编号',
-    name VARCHAR(255) COMMENT '商店显示名称',
-    app_type VARCHAR(50) COMMENT '应用类型：game / software / demo / dlc',
-    is_free TINYINT(1) COMMENT '是否免费：1=免费，0=付费',
-    release_year INT COMMENT '发售年份',
-    initial_price_usd DECIMAL(10,2) COMMENT '美区原价（美元）',
-    final_price_usd DECIMAL(10,2) COMMENT '当前折后价（美元）',
-    discount_percent INT COMMENT '当前折扣比例 (0-100)',
-    main_genre VARCHAR(100) COMMENT '主游戏类型',
-    achievements_count INT COMMENT '成就总数',
-    dirty_note VARCHAR(100) COMMENT '原始异常标记',
-    raw_json TEXT COMMENT '接口返回原始 JSON 备份'
-) ENGINE=InnoDB COMMENT='原始层：Steam 商店详情 appdetails 原始表';
-
-DROP TABLE IF EXISTS ods_steam_reviews;
-CREATE TABLE ods_steam_reviews (
-    appid INT PRIMARY KEY COMMENT 'Steam 应用编号',
-    cutoff_date DATE NOT NULL COMMENT '评测统计截断日期',
-    total_reviews INT NOT NULL COMMENT '截断日期前累计评测总数',
-    total_positive INT NOT NULL COMMENT '累计好评数',
-    total_negative INT NOT NULL COMMENT '累计差评数',
-    positive_rate DECIMAL(6,4) COMMENT '好评率 (0~1)',
-    schinese_review_ratio DECIMAL(6,4) COMMENT '简体中文评测占比 (0~1)',
-    avg_playtime_at_review_hrs DECIMAL(10,2) COMMENT '评测作者写评测时平均游玩小时数',
-    steamspy_avg_forever_min INT COMMENT 'SteamSpy 全量玩家平均总时长（分钟）',
-    steamcharts_total_player_hours BIGINT COMMENT 'SteamCharts 累计总游玩小时数',
-    steamcharts_avg_ccu DECIMAL(12,2) COMMENT 'SteamCharts 历史月均同时在线人数'
-) ENGINE=InnoDB COMMENT='原始层：Steam 评测与在线时长原始采集表';
-
-DROP TABLE IF EXISTS ods_recent_sales_news;
-CREATE TABLE ods_recent_sales_news (
-    audit_id INT AUTO_INCREMENT PRIMARY KEY,
+-- ----------------------------------------------------------------------------- 原始层
+CREATE TABLE ods_ars_players_2018 (
+    row_no INT PRIMARY KEY COMMENT '原始 CSV 行号（原文件有 6 组重复行，原样保留）',
     appid INT NOT NULL,
-    name VARCHAR(255) NOT NULL,
-    news_date DATE NOT NULL,
-    raw_sentence TEXT NOT NULL,
-    llm_extracted_number BIGINT,
-    llm_extracted_metric VARCHAR(50),
-    llm_extracted_platform VARCHAR(100),
-    human_audit_status VARCHAR(50),
-    human_audit_reason VARCHAR(500),
-    source_url VARCHAR(500) NOT NULL
-) ENGINE=InnoDB COMMENT='原始层：GetNewsForApp 销量里程碑公告扫描与人工核对表';
+    title VARCHAR(255) COMMENT '原文件游戏名（编码混乱，仅供参考）',
+    players BIGINT NOT NULL COMMENT '2018-07-01 成就接口反推的玩家数',
+    source_url VARCHAR(500),
+    KEY idx_ods_ars_appid (appid)
+) ENGINE=InnoDB COMMENT='原始层：Ars Technica 2018-07-01 泄露玩家数';
 
-DROP TABLE IF EXISTS etl_job_log;
+CREATE TABLE ods_steam_appdetails (
+    appid INT PRIMARY KEY,
+    success TINYINT COMMENT '接口是否返回成功（0 = 已下架或锁区）',
+    name VARCHAR(255), app_type VARCHAR(50), is_free TINYINT,
+    release_date_text VARCHAR(100), release_date DATE,
+    currency VARCHAR(10), initial_price_usd DECIMAL(10,2), final_price_usd DECIMAL(10,2), discount_percent INT,
+    genres VARCHAR(500), categories TEXT, developers VARCHAR(500), publishers VARCHAR(500),
+    metacritic INT, achievements_total INT, supports_schinese TINYINT, fetched_at DATETIME
+) ENGINE=InnoDB COMMENT='原始层：商店详情 appdetails（cc=us）';
+
+CREATE TABLE ods_steam_reviews_at_cutoff (
+    appid INT NOT NULL, cohort VARCHAR(20) NOT NULL, cutoff_date DATE NOT NULL, cutoff_ts BIGINT,
+    total_reviews INT, total_positive INT, total_negative INT,
+    schinese_reviews INT COMMENT '简体中文评测数',
+    steam_purchase_reviews INT COMMENT '在 Steam 内购买的玩家写的评测数',
+    reviews_before_policy INT COMMENT '评测提示政策上线前的评测数（跨时代样本才有）',
+    sample_n INT, sample_median_playtime_at_review_hrs DECIMAL(12,3), sample_mean_playtime_at_review_hrs DECIMAL(12,3),
+    first_review_date DATE COMMENT '第一条评测日期（只对商店发售日晚于截止日的游戏补查）',
+    fetched_at DATETIME,
+    PRIMARY KEY (appid, cohort, cutoff_date)
+) ENGINE=InnoDB COMMENT='原始层：截至截止日的评测汇总（GetAppReviews, input_json 传参）';
+
+CREATE TABLE ods_steamcharts_monthly (
+    appid INT NOT NULL, month CHAR(7) NOT NULL, avg_players DECIMAL(14,2), peak_players INT,
+    PRIMARY KEY (appid, month)
+) ENGINE=InnoDB COMMENT='原始层：SteamCharts 月度平均/峰值在线';
+
+CREATE TABLE ods_recent_sales_truth (
+    truth_id INT PRIMARY KEY, appid INT NOT NULL, game VARCHAR(255), report_date DATE NOT NULL,
+    reported_sales BIGINT NOT NULL, reported_sales_text VARCHAR(20), source_url VARCHAR(1000),
+    gamalytic_estimate BIGINT COMMENT 'Gamalytic 对同一游戏的估算（对照用）', benchmark_source VARCHAR(500)
+) ENGINE=InnoDB COMMENT='原始层：近年公开销量真值（来自 Gamalytic 测试表，每条附原始出处）';
+
+CREATE TABLE ods_price_history_wayback (
+    appid INT NOT NULL, name VARCHAR(255), observed_date DATE NOT NULL, wayback_timestamp CHAR(14) NOT NULL,
+    base_price_usd DECIMAL(10,2), final_price_usd DECIMAL(10,2), discount_percent INT, archive_url VARCHAR(500),
+    PRIMARY KEY (appid, wayback_timestamp)
+) ENGINE=InnoDB COMMENT='原始层：互联网档案馆商店页存档中的历史价格';
+
+CREATE TABLE ods_review_monthly_policy_scan (
+    appid INT NOT NULL, month CHAR(7) NOT NULL, new_reviews INT,
+    PRIMARY KEY (appid, month)
+) ENGINE=InnoDB COMMENT='原始层：40 款老游戏每月新增评测数（判定评测提示上线月份）';
+
+-- ----------------------------------------------------------------------------- 运维表
 CREATE TABLE etl_job_log (
-    job_id INT AUTO_INCREMENT PRIMARY KEY,
-    job_name VARCHAR(100) NOT NULL,
-    batch_date VARCHAR(20) NOT NULL,
-    start_time DATETIME NOT NULL,
-    end_time DATETIME NOT NULL,
-    rows_extracted INT DEFAULT 0,
-    rows_loaded INT DEFAULT 0,
-    rows_rejected INT DEFAULT 0,
-    status VARCHAR(20) NOT NULL,
-    duration_ms INT DEFAULT 0,
-    message VARCHAR(500)
-) ENGINE=InnoDB COMMENT='运维层：ETL 作业运行日志表';
+    job_id INT AUTO_INCREMENT PRIMARY KEY, job_name VARCHAR(100) NOT NULL,
+    start_time DATETIME NOT NULL, end_time DATETIME NOT NULL,
+    rows_extracted INT DEFAULT 0, rows_loaded INT DEFAULT 0, rows_rejected INT DEFAULT 0,
+    status VARCHAR(30) NOT NULL, duration_ms INT DEFAULT 0, message VARCHAR(1000)
+) ENGINE=InnoDB COMMENT='ETL 运行日志';
 
-DROP TABLE IF EXISTS etl_checkpoint;
 CREATE TABLE etl_checkpoint (
     job_name VARCHAR(100) PRIMARY KEY,
-    last_processed_appid INT DEFAULT 0,
-    last_cursor VARCHAR(255) DEFAULT '*',
-    last_update_time DATETIME,
-    status VARCHAR(30) DEFAULT 'READY',
-    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
-) ENGINE=InnoDB COMMENT='运维层：ETL 断点续传与增量水位线检查点表';
+    last_processed_key VARCHAR(50) COMMENT '已提交的最后一个样本键（断点续传）',
+    last_update_time DATETIME COMMENT '增量水位线',
+    status VARCHAR(30) DEFAULT 'READY', updated_at DATETIME
+) ENGINE=InnoDB COMMENT='检查点：断点续传与增量水位线';
 
-DROP TABLE IF EXISTS etl_clean_error_log;
 CREATE TABLE etl_clean_error_log (
-    error_id INT AUTO_INCREMENT PRIMARY KEY,
-    job_name VARCHAR(100) NOT NULL,
-    appid INT NOT NULL,
-    game_name VARCHAR(255),
-    rule_code VARCHAR(50) NOT NULL,
-    raw_value_desc VARCHAR(255),
-    clean_action VARCHAR(50) DEFAULT 'FILTERED_OUT',
-    logged_at DATETIME DEFAULT CURRENT_TIMESTAMP
-) ENGINE=InnoDB COMMENT='运维层：数据清洗异常与过滤审计日志表';
+    error_id INT AUTO_INCREMENT PRIMARY KEY, job_name VARCHAR(100) NOT NULL, appid INT NOT NULL,
+    cohort VARCHAR(20), game_name VARCHAR(255), rule_code VARCHAR(50) NOT NULL, raw_value_desc VARCHAR(500),
+    clean_action VARCHAR(30) NOT NULL COMMENT 'FILTERED_OUT / FLAGGED / DEDUPLICATED', logged_at DATETIME,
+    KEY idx_err_rule (rule_code)
+) ENGINE=InnoDB COMMENT='清洗审计：被拦截或标记的记录';
 
-DROP TABLE IF EXISTS dim_genre;
+-- ----------------------------------------------------------------------------- 维度表
 CREATE TABLE dim_genre (
-    genre_id INT PRIMARY KEY,
-    genre_name VARCHAR(50) NOT NULL UNIQUE,
-    genre_cn_name VARCHAR(50) NOT NULL,
-    audience_category VARCHAR(50) NOT NULL
-) ENGINE=InnoDB COMMENT='维度表：游戏类型维';
+    genre_id INT PRIMARY KEY, genre_name VARCHAR(50) NOT NULL UNIQUE, genre_cn_name VARCHAR(50) NOT NULL
+) ENGINE=InnoDB COMMENT='维度：主类型';
 
-DROP TABLE IF EXISTS dim_release_date;
 CREATE TABLE dim_release_date (
-    date_key INT PRIMARY KEY,
-    release_year INT NOT NULL UNIQUE,
-    era_code VARCHAR(30) NOT NULL,
-    era_name VARCHAR(100) NOT NULL,
-    has_review_prompt_policy TINYINT(1) NOT NULL,
-    literature_k_multiple DECIMAL(8,2) NOT NULL
-) ENGINE=InnoDB COMMENT='维度表：发售时间与政策时代维';
+    date_key INT PRIMARY KEY, release_year INT NOT NULL UNIQUE, era_code VARCHAR(30) NOT NULL,
+    era_name VARCHAR(50) NOT NULL, has_review_prompt_policy TINYINT NOT NULL, literature_k_multiple DECIMAL(6,2) NOT NULL
+) ENGINE=InnoDB COMMENT='维度：发售年份（含评测提示政策分期与文献 k）';
 
-DROP TABLE IF EXISTS dim_estimation_method;
 CREATE TABLE dim_estimation_method (
-    method_id INT PRIMARY KEY,
-    method_code VARCHAR(30) NOT NULL UNIQUE,
-    method_name VARCHAR(100) NOT NULL,
-    signal_source VARCHAR(50) NOT NULL,
-    impl_tech VARCHAR(50) NOT NULL,
+    method_id INT PRIMARY KEY, method_code VARCHAR(30) NOT NULL UNIQUE, method_name VARCHAR(100) NOT NULL,
+    signal_source VARCHAR(30) NOT NULL, impl_tech VARCHAR(30) NOT NULL,
+    uses_truth_for_fitting TINYINT NOT NULL COMMENT '是否在真值集上拟合参数（是则一律留一法）',
     description VARCHAR(500) NOT NULL
-) ENGINE=InnoDB COMMENT='维度表：销量估算方法维';
+) ENGINE=InnoDB COMMENT='维度：估算方法（FineBI 切片器）';
 
-DROP TABLE IF EXISTS dim_game;
 CREATE TABLE dim_game (
-    game_key INT PRIMARY KEY,
-    appid INT NOT NULL UNIQUE,
-    name VARCHAR(255) NOT NULL,
-    genre_id INT NOT NULL,
-    date_key INT NOT NULL,
-    initial_price_usd DECIMAL(10,2) NOT NULL,
-    price_tier VARCHAR(50) NOT NULL,
-    is_cross_era TINYINT(1) DEFAULT 0,
-    data_cohort VARCHAR(30) NOT NULL,
+    game_key INT PRIMARY KEY, appid INT NOT NULL UNIQUE, name VARCHAR(255) NOT NULL,
+    genre_id INT NOT NULL, date_key INT NOT NULL, release_date DATE,
+    price_usd DECIMAL(10,2) NOT NULL, price_tier VARCHAR(20) NOT NULL, is_indie TINYINT NOT NULL,
     CONSTRAINT fk_game_genre FOREIGN KEY (genre_id) REFERENCES dim_genre(genre_id),
     CONSTRAINT fk_game_date FOREIGN KEY (date_key) REFERENCES dim_release_date(date_key)
-) ENGINE=InnoDB COMMENT='维度表：游戏核心信息维';
+) ENGINE=InnoDB COMMENT='维度：游戏';
 
-DROP TABLE IF EXISTS dim_price_scd2;
 CREATE TABLE dim_price_scd2 (
-    price_scd_key INT AUTO_INCREMENT PRIMARY KEY,
-    appid INT NOT NULL,
-    name VARCHAR(255) NOT NULL,
-    base_price_usd DECIMAL(10,2) NOT NULL,
-    discount_percent INT NOT NULL,
-    final_price_usd DECIMAL(10,2) NOT NULL,
-    event_type VARCHAR(100),
-    effective_start DATE NOT NULL,
-    effective_end DATE NOT NULL,
-    is_current TINYINT(1) NOT NULL DEFAULT 1,
-    version_no INT NOT NULL DEFAULT 1,
-    is_simulated TINYINT(1) NOT NULL DEFAULT 1
-) ENGINE=InnoDB COMMENT='维度表：游戏价格缓慢变化维 (SCD Type 2 拉链表)';
+    price_scd_key INT AUTO_INCREMENT PRIMARY KEY, appid INT NOT NULL, name VARCHAR(255) NOT NULL,
+    base_price_usd DECIMAL(10,2) NOT NULL, discount_percent INT NOT NULL, final_price_usd DECIMAL(10,2) NOT NULL,
+    effective_start DATE NOT NULL, effective_end DATE NOT NULL COMMENT '当前版本为 9999-12-31',
+    is_current TINYINT NOT NULL, version_no INT NOT NULL,
+    observation_source VARCHAR(30) NOT NULL COMMENT 'wayback_archive / store_api', source_ref VARCHAR(500)
+) ENGINE=InnoDB COMMENT='维度：价格缓慢变化维 SCD Type 2（真实观测）';
 
-DROP TABLE IF EXISTS dwd_steam_game_aligned;
-CREATE TABLE dwd_steam_game_aligned (
-    appid INT PRIMARY KEY,
-    name VARCHAR(255) NOT NULL,
-    release_year INT NOT NULL,
-    genre VARCHAR(50) NOT NULL,
-    price_usd DECIMAL(10,2) NOT NULL,
-    price_tier VARCHAR(50) NOT NULL,
-    total_reviews INT NOT NULL,
-    reviews_pre_2019 INT NOT NULL,
-    reviews_post_2019 INT NOT NULL,
-    positive_rate DECIMAL(6,4) NOT NULL,
-    positive_rate_tier VARCHAR(50) NOT NULL,
-    schinese_ratio DECIMAL(6,4) NOT NULL,
-    avg_playtime_at_review_hrs DECIMAL(10,2) NOT NULL,
-    steamspy_avg_forever_min INT NOT NULL,
-    steamcharts_total_player_hours BIGINT NOT NULL,
-    true_sales_or_players BIGINT NOT NULL,
-    k_ratio DECIMAL(10,4) NOT NULL,
-    log_k DECIMAL(10,4) NOT NULL,
-    log_reviews DECIMAL(10,4) NOT NULL,
-    log_price DECIMAL(10,4) NOT NULL,
-    data_cohort VARCHAR(30) NOT NULL,
-    snapshot_or_report_date DATE NOT NULL,
-    source_url VARCHAR(500),
-    steam_purchase_ratio DECIMAL(8,4) DEFAULT 0.8500,
-    max_discount_pct INT DEFAULT 50,
-    achievement_first_rate DECIMAL(8,4) DEFAULT 0.8200,
-    launch_30d_review_share DECIMAL(8,4) DEFAULT 0.4500,
-    peak_ccu INT DEFAULT 1000,
-    has_preorder TINYINT(1) DEFAULT 0,
-    ccu_tail_ratio DECIMAL(8,4) DEFAULT 1.5000,
-    steam_followers INT DEFAULT 5000,
-    top_seller_weeks INT DEFAULT 0,
-    audience_cluster_idx DECIMAL(8,4) DEFAULT 0.0000
-) ENGINE=InnoDB COMMENT='明细层：清洗对齐后的买断制游戏分析宽表（含H1~H6全维度特征）';
+-- ----------------------------------------------------------------------------- 明细层
+CREATE TABLE dwd_game_sample (
+    sample_id INT PRIMARY KEY, appid INT NOT NULL, name VARCHAR(255) NOT NULL,
+    cohort VARCHAR(20) NOT NULL COMMENT 'train_2018 / truth',
+    era_group VARCHAR(20) NOT NULL COMMENT 'pre_policy / cross_era / post_policy',
+    cutoff_date DATE NOT NULL, release_date DATE NOT NULL COMMENT '实际上架日期（三个来源取最早）',
+    release_date_source VARCHAR(30) NOT NULL COMMENT 'store / first_review / steamcharts_first_month',
+    release_year INT NOT NULL, game_age_years DECIMAL(8,4) NOT NULL,
+    genre VARCHAR(50) NOT NULL, is_indie TINYINT NOT NULL, price_usd DECIMAL(10,2) NOT NULL, price_tier VARCHAR(20) NOT NULL,
+    total_reviews INT NOT NULL, reviews_before_policy INT NOT NULL, reviews_after_policy INT NOT NULL,
+    positive_rate DECIMAL(6,4) NOT NULL, positive_rate_tier VARCHAR(20) NOT NULL,
+    schinese_ratio DECIMAL(6,4) NOT NULL, steam_purchase_ratio DECIMAL(6,4) NOT NULL,
+    playtime_review_median_hrs DECIMAL(12,3), review_sample_n INT,
+    charts_total_hours DECIMAL(18,1), charts_coverage TINYINT NOT NULL,
+    truth_value BIGINT NOT NULL, truth_type VARCHAR(30) NOT NULL,
+    k_ratio DECIMAL(14,4) NOT NULL, log_k DECIMAL(12,6) NOT NULL, log_reviews DECIMAL(12,6) NOT NULL,
+    log_price DECIMAL(12,6) NOT NULL, model_eligible TINYINT NOT NULL, eligibility_note VARCHAR(500),
+    source_url VARCHAR(1000)
+) ENGINE=InnoDB COMMENT='明细层：样本宽表（一行 = 一款游戏在一个截止日）';
 
-DROP TABLE IF EXISTS fact_sales_estimation;
+-- ----------------------------------------------------------------------------- 结果层
 CREATE TABLE fact_sales_estimation (
-    estimation_id INT AUTO_INCREMENT PRIMARY KEY,
-    appid INT NOT NULL,
-    game_key INT NOT NULL,
-    genre_id INT NOT NULL,
-    date_key INT NOT NULL,
-    method_id INT NOT NULL,
-    method_code VARCHAR(30) NOT NULL,
-    data_cohort VARCHAR(30) NOT NULL,
-    total_reviews INT NOT NULL,
-    price_usd DECIMAL(10,2) NOT NULL,
-    true_sales_or_players BIGINT NOT NULL,
-    estimated_sales BIGINT NOT NULL,
-    estimated_low_bound BIGINT NOT NULL,
-    estimated_high_bound BIGINT NOT NULL,
-    estimated_revenue_usd DECIMAL(16,2) NOT NULL,
-    implied_k DECIMAL(10,2) NOT NULL,
-    observed_k DECIMAL(10,2) NOT NULL,
-    pct_error DECIMAL(10,4) NOT NULL,
-    abs_pct_error DECIMAL(10,4) NOT NULL,
-    within_30pct_flag TINYINT(1) NOT NULL,
-    within_50pct_flag TINYINT(1) NOT NULL,
+    estimation_id INT AUTO_INCREMENT PRIMARY KEY, sample_id INT NOT NULL, appid INT NOT NULL,
+    game_key INT NOT NULL, genre_id INT NOT NULL, date_key INT NOT NULL, method_id INT NOT NULL,
+    method_code VARCHAR(30) NOT NULL, cohort VARCHAR(20) NOT NULL, era_group VARCHAR(20) NOT NULL,
+    total_reviews INT NOT NULL, price_usd DECIMAL(10,2) NOT NULL, true_value BIGINT NOT NULL,
+    estimated_sales BIGINT NOT NULL, estimated_low_bound BIGINT NOT NULL, estimated_high_bound BIGINT NOT NULL,
+    estimated_revenue_usd DECIMAL(16,2) NOT NULL COMMENT '估算销量 × 当前标价（毛收入上限）',
+    implied_k DECIMAL(14,3) NOT NULL, observed_k DECIMAL(14,3) NOT NULL,
+    pct_error DECIMAL(12,5) NOT NULL, abs_pct_error DECIMAL(12,5) NOT NULL,
+    within_30pct_flag TINYINT NOT NULL, within_50pct_flag TINYINT NOT NULL,
     CONSTRAINT fk_fact_game FOREIGN KEY (game_key) REFERENCES dim_game(game_key),
     CONSTRAINT fk_fact_genre FOREIGN KEY (genre_id) REFERENCES dim_genre(genre_id),
     CONSTRAINT fk_fact_date FOREIGN KEY (date_key) REFERENCES dim_release_date(date_key),
     CONSTRAINT fk_fact_method FOREIGN KEY (method_id) REFERENCES dim_estimation_method(method_id)
-) ENGINE=InnoDB COMMENT='事实表：星型模型多方法销量估算事实表';
+) ENGINE=InnoDB COMMENT='事实表：样本 × 估算方法';
 
-DROP TABLE IF EXISTS fact_daily_snapshot;
-CREATE TABLE fact_daily_snapshot (
-    snapshot_id INT AUTO_INCREMENT PRIMARY KEY,
-    snapshot_date DATE NOT NULL,
-    appid INT NOT NULL,
-    name VARCHAR(255) NOT NULL,
-    total_reviews INT NOT NULL,
-    daily_new_reviews INT NOT NULL,
-    current_players INT NOT NULL,
-    discount_percent INT NOT NULL,
-    final_price_usd DECIMAL(10,2) NOT NULL,
-    last_update_time DATETIME NOT NULL,
-    is_simulated TINYINT(1) NOT NULL DEFAULT 1
-) ENGINE=InnoDB COMMENT='事实表：每日评测与在线人数周期快照事实表';
+CREATE TABLE fact_snapshot (
+    snapshot_id INT AUTO_INCREMENT PRIMARY KEY, fetched_at DATETIME NOT NULL, round_no INT NOT NULL,
+    appid INT NOT NULL, name VARCHAR(255), current_players INT, total_reviews INT, new_reviews_since_prev INT,
+    total_positive INT, final_price_usd DECIMAL(10,2), discount_percent INT, loaded_at DATETIME NOT NULL,
+    UNIQUE KEY uk_snapshot (appid, fetched_at)
+) ENGINE=InnoDB COMMENT='周期快照事实表（每小时；按 fetched_at 水位线增量装载）';
 
-DROP TABLE IF EXISTS ads_model_eval_summary;
+CREATE TABLE ads_review_monthly_index (
+    month CHAR(7) PRIMARY KEY, median_index DECIMAL(10,4), q25 DECIMAL(10,4), q75 DECIMAL(10,4),
+    n_games INT, is_policy_month TINYINT
+) ENGINE=InnoDB COMMENT='结果：老游戏月度评测指数';
+
 CREATE TABLE ads_model_eval_summary (
-    eval_id INT AUTO_INCREMENT PRIMARY KEY,
-    eval_cohort VARCHAR(50) NOT NULL,
-    method_code VARCHAR(30) NOT NULL,
-    method_name VARCHAR(100) NOT NULL,
-    sample_size INT NOT NULL,
-    mape_pct DECIMAL(8,2),
-    mdape_pct DECIMAL(8,2),
-    r2_log DECIMAL(8,4),
-    hit_rate_10pct DECIMAL(8,2),
-    hit_rate_30pct DECIMAL(8,2) NOT NULL,
-    hit_rate_50pct DECIMAL(8,2),
-    note VARCHAR(255)
-) ENGINE=InnoDB COMMENT='结果层：多模型与商业基准准确率对比汇总表';
+    eval_id INT AUTO_INCREMENT PRIMARY KEY, eval_cohort VARCHAR(50) NOT NULL, method_code VARCHAR(30) NOT NULL,
+    method_name VARCHAR(100) NOT NULL, sample_size INT NOT NULL, mape_pct DECIMAL(10,2), mdape_pct DECIMAL(10,2),
+    r2_log DECIMAL(10,4), hit_rate_10pct DECIMAL(6,2), hit_rate_30pct DECIMAL(6,2), hit_rate_50pct DECIMAL(6,2),
+    note VARCHAR(500)
+) ENGINE=InnoDB COMMENT='结果：各方法准确率';
 
-DROP TABLE IF EXISTS ads_feature_importance;
 CREATE TABLE ads_feature_importance (
-    feat_id INT AUTO_INCREMENT PRIMARY KEY,
-    feature_code VARCHAR(50) NOT NULL,
-    feature_cn_name VARCHAR(100) NOT NULL,
-    m2_ols_coef DECIMAL(10,4),
-    m2_std_err DECIMAL(10,4),
-    m2_t_stat DECIMAL(10,4),
-    m2_p_value DECIMAL(10,6),
-    m4_rf_importance_pct DECIMAL(8,2),
-    m4_gbdt_importance_pct DECIMAL(8,2),
-    direction_desc VARCHAR(255)
-) ENGINE=InnoDB COMMENT='结果层：M2回归系数与M4树模型特征重要性汇总表';
+    feat_id INT AUTO_INCREMENT PRIMARY KEY, feature_code VARCHAR(50) NOT NULL, feature_cn_name VARCHAR(100) NOT NULL,
+    m2_ols_coef DECIMAL(14,5), m2_std_err DECIMAL(14,5), m2_t_stat DECIMAL(12,3), m2_p_value DOUBLE,
+    m4_rf_importance_pct DECIMAL(8,2), m4_gbdt_importance_pct DECIMAL(8,2)
+) ENGINE=InnoDB COMMENT='结果：回归系数与树模型特征重要性';
 
-DROP TABLE IF EXISTS ads_hypothesis_ablation;
-CREATE TABLE ads_hypothesis_ablation (
-    step_code VARCHAR(40) PRIMARY KEY,
-    step_name VARCHAR(120) NOT NULL,
-    mape_pct DECIMAL(8,2) NOT NULL,
-    mdape_pct DECIMAL(8,2) NOT NULL,
-    r2_log DECIMAL(8,4) NOT NULL,
-    hit_rate_10pct DECIMAL(8,2) NOT NULL,
-    hit_rate_30pct DECIMAL(8,2) NOT NULL,
-    hit_rate_50pct DECIMAL(8,2) NOT NULL,
-    mechanism_desc VARCHAR(255)
-) ENGINE=InnoDB COMMENT='结果层：6大科学假设(H1~H6)逐步消融实验统计汇总表';
+CREATE TABLE ads_policy_calibration (
+    calib_id INT AUTO_INCREMENT PRIMARY KEY, item VARCHAR(60) NOT NULL, value DOUBLE, note VARCHAR(500)
+) ENGINE=InnoDB COMMENT='结果：政策校准系数、信号 B 参数、融合权重、残差检验';
+
+-- ----------------------------------------------------------------------------- Kettle 转换的输出表
+-- 和 Python 写的表分开，跑完可以直接对比两边结果是否一致
+CREATE TABLE stg_kettle_train_clean (
+    appid INT, name VARCHAR(255), release_date VARCHAR(20), price_usd DECIMAL(10,2), players BIGINT,
+    total_reviews INT, positive_rate DOUBLE, k_ratio DOUBLE
+) ENGINE=InnoDB COMMENT='Kettle 清洗转换输出（对照 dwd_game_sample 的 train_2018 部分）';
+
+CREATE TABLE dim_price_scd2_kettle (
+    price_scd_key INT AUTO_INCREMENT PRIMARY KEY, version_no INT, effective_start DATETIME, effective_end DATETIME,
+    appid INT, name VARCHAR(255), base_price_usd DOUBLE, final_price_usd DOUBLE, discount_percent INT,
+    source_ref VARCHAR(500), is_current CHAR(1),
+    KEY idx_kettle_scd2 (appid, effective_start)
+) ENGINE=InnoDB COMMENT='Kettle 维度查询/更新步骤维护的价格拉链（对照 dim_price_scd2）';

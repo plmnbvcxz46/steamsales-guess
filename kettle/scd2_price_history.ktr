@@ -2,11 +2,21 @@
 <transformation>
   <info>
     <name>scd2_price_history</name>
-    <description>游戏价格维度 SCD Type 2 缓慢变化维拉链更新转换</description>
-    <extended_description>使用 Kettle 维度查询/更新 (DimensionLookup) 组件自动维护 effective_start, effective_end, version_no, is_current</extended_description>
-    <trans_version>1.0</trans_version>
+    <description>价格维度 SCD Type 2（Kettle 版）：用"维度查询/更新"步骤回放档案馆价格观测</description>
+    <extended_description>输入 data/raw/price_history_wayback.csv（真实观测）。写入 dim_price_scd2_kettle，与 Python 版 dim_price_scd2 对照。</extended_description>
+    <trans_version>2.0</trans_version>
     <trans_type>Normal</trans_type>
     <directory>/</directory>
+    <parameters/>
+    <log/>
+    <maxdate/>
+    <size_rowset>10000</size_rowset>
+    <sleep_time_empty>50</sleep_time_empty>
+    <sleep_time_full>50</sleep_time_full>
+    <unique_connections>N</unique_connections>
+    <feedback_shown>Y</feedback_shown>
+    <feedback_size>50000</feedback_size>
+    <using_thread_priorities>Y</using_thread_priorities>
   </info>
   <connection>
     <name>Steam_MySQL_DW</name>
@@ -16,71 +26,124 @@
     <database>steam_sales_dw</database>
     <port>3306</port>
     <username>root</username>
-    <password>Encrypted 2be98afc86aa7f2e4cb79ce10cc9da0ce</password>
+    <password>Encrypted </password>
+    <servername/>
+    <data_tablespace/>
+    <index_tablespace/>
+    <attributes>
+      <attribute><code>PORT_NUMBER</code><attribute>3306</attribute></attribute>
+      <attribute><code>EXTRA_OPTION_MYSQL.characterEncoding</code><attribute>utf8</attribute></attribute>
+      <attribute><code>EXTRA_OPTION_MYSQL.serverTimezone</code><attribute>Asia/Shanghai</attribute></attribute>
+    </attributes>
   </connection>
   <order>
-    <hop>
-      <from>CSV文件输入_价格变动事件流(sim_price_changes)</from>
-      <to>维度查询与更新_SCD2价格历史维(dim_price_scd2)</to>
-      <enabled>Y</enabled>
-    </hop>
+    <hop><from>CSV_档案馆价格观测</from><to>排序_按游戏和日期</to><enabled>Y</enabled></hop>
+    <hop><from>排序_按游戏和日期</from><to>维度更新_价格拉链</to><enabled>Y</enabled></hop>
   </order>
+
   <step>
-    <name>CSV文件输入_价格变动事件流(sim_price_changes)</name>
+    <name>CSV_档案馆价格观测</name>
     <type>CsvInput</type>
-    <filename>${Internal.Entry.Current.Directory}/../data/simulated/sim_price_changes.csv</filename>
-    <delimiter>,</delimiter>
+    <description>每行 = 某天档案馆存档里看到的美元价格</description>
+    <distribute>Y</distribute>
+    <custom_distribution/>
+    <copies>1</copies>
+    <partitioning><method>none</method><schema_name/></partitioning>
+    <filename>${Internal.Entry.Current.Directory}/../data/raw/price_history_wayback.csv</filename>
+    <filename_field/>
+    <rownum_field/>
+    <include_filename>N</include_filename>
+    <separator>,</separator>
+    <enclosure>"</enclosure>
     <header>Y</header>
+    <buffer_size>50000</buffer_size>
+    <lazy_conversion>N</lazy_conversion>
+    <add_filename_result>N</add_filename_result>
+    <parallel>N</parallel>
+    <newline_possible>N</newline_possible>
     <encoding>UTF-8</encoding>
     <fields>
-      <field><name>appid</name><type>Integer</type></field>
-      <field><name>name</name><type>String</type></field>
-      <field><name>price_usd</name><type>Number</type></field>
-      <field><name>discount_pct</name><type>Integer</type></field>
-      <field><name>final_price_usd</name><type>Number</type></field>
-      <field><name>change_date</name><type>Date</type></field>
-      <field><name>event_type</name><type>String</type></field>
+      <field><name>appid</name><type>Integer</type><format/><currency/><decimal/><group/><length>15</length><precision>0</precision><trim_type>both</trim_type></field>
+      <field><name>name</name><type>String</type><format/><currency/><decimal/><group/><length>-1</length><precision>-1</precision><trim_type>both</trim_type></field>
+      <field><name>observed_date</name><type>Date</type><format>yyyy-MM-dd</format><currency/><decimal/><group/><length>-1</length><precision>-1</precision><trim_type>both</trim_type></field>
+      <field><name>wayback_timestamp</name><type>String</type><format/><currency/><decimal/><group/><length>-1</length><precision>-1</precision><trim_type>both</trim_type></field>
+      <field><name>archive_url</name><type>String</type><format/><currency/><decimal/><group/><length>-1</length><precision>-1</precision><trim_type>both</trim_type></field>
+      <field><name>base_price_usd</name><type>Number</type><format/><currency/><decimal>.</decimal><group/><length>-1</length><precision>-1</precision><trim_type>both</trim_type></field>
+      <field><name>final_price_usd</name><type>Number</type><format/><currency/><decimal>.</decimal><group/><length>-1</length><precision>-1</precision><trim_type>both</trim_type></field>
+      <field><name>discount_percent</name><type>Integer</type><format/><currency/><decimal/><group/><length>15</length><precision>0</precision><trim_type>both</trim_type></field>
+      <field><name>raw_original</name><type>String</type><format/><currency/><decimal/><group/><length>-1</length><precision>-1</precision><trim_type>both</trim_type></field>
+      <field><name>raw_final</name><type>String</type><format/><currency/><decimal/><group/><length>-1</length><precision>-1</precision><trim_type>both</trim_type></field>
     </fields>
+    <GUI><xloc>80</xloc><yloc>120</yloc><draw>Y</draw></GUI>
   </step>
+
   <step>
-    <name>维度查询与更新_SCD2价格历史维(dim_price_scd2)</name>
+    <name>排序_按游戏和日期</name>
+    <type>SortRows</type>
+    <description>维度更新要求同一款游戏的观测按时间先后到达</description>
+    <distribute>Y</distribute>
+    <custom_distribution/>
+    <copies>1</copies>
+    <partitioning><method>none</method><schema_name/></partitioning>
+    <directory>%%java.io.tmpdir%%</directory>
+    <prefix>out</prefix>
+    <sort_size>1000000</sort_size>
+    <free_memory/>
+    <compress>N</compress>
+    <compress_variable/>
+    <unique_rows>N</unique_rows>
+    <fields>
+      <field><name>appid</name><ascending>Y</ascending><case_sensitive>N</case_sensitive><collator_enabled>N</collator_enabled><collator_strength>0</collator_strength><presorted>N</presorted></field>
+      <field><name>observed_date</name><ascending>Y</ascending><case_sensitive>N</case_sensitive><collator_enabled>N</collator_enabled><collator_strength>0</collator_strength><presorted>N</presorted></field>
+    </fields>
+    <GUI><xloc>280</xloc><yloc>120</yloc><draw>Y</draw></GUI>
+  </step>
+
+  <step>
+    <name>维度更新_价格拉链</name>
     <type>DimensionLookup</type>
-    <description>当 final_price_usd 或 discount_pct 发生变化时，闭合旧记录并插入新版本 (Insert New Version)</description>
+    <description>原价、成交价、折扣任一变化：旧版本 effective_end 设为本次观测日、is_current 置 0，插入 version+1 的新版本</description>
+    <distribute>Y</distribute>
+    <custom_distribution/>
+    <copies>1</copies>
+    <partitioning><method>none</method><schema_name/></partitioning>
+    <schema/>
+    <table>dim_price_scd2_kettle</table>
     <connection>Steam_MySQL_DW</connection>
-    <table>dim_price_scd2</table>
+    <commit>100</commit>
     <update>Y</update>
-    <date>
-      <name>change_date</name>
-      <from>effective_start</from>
-      <to>effective_end</to>
-    </date>
     <fields>
       <key>
         <name>appid</name>
         <lookup>appid</lookup>
       </key>
-      <field>
-        <name>final_price_usd</name>
-        <lookup>final_price_usd</lookup>
-        <update>Insert</update>
-      </field>
-      <field>
-        <name>discount_pct</name>
-        <lookup>discount_percent</lookup>
-        <update>Insert</update>
-      </field>
-      <field>
-        <name>event_type</name>
-        <lookup>event_type</lookup>
-        <update>Insert</update>
-      </field>
+      <date>
+        <name>observed_date</name>
+        <from>effective_start</from>
+        <to>effective_end</to>
+      </date>
+      <field><name>name</name><lookup>name</lookup><update>Punch through</update></field>
+      <field><name>base_price_usd</name><lookup>base_price_usd</lookup><update>Insert</update></field>
+      <field><name>final_price_usd</name><lookup>final_price_usd</lookup><update>Insert</update></field>
+      <field><name>discount_percent</name><lookup>discount_percent</lookup><update>Insert</update></field>
+      <field><name>archive_url</name><lookup>source_ref</lookup><update>Insert</update></field>
+      <field><name/><lookup>is_current</lookup><update>LastVersion</update></field>
       <return>
         <name>price_scd_key</name>
+        <rename/>
         <creation_method>autoinc</creation_method>
+        <use_autoinc>Y</use_autoinc>
         <version>version_no</version>
       </return>
     </fields>
-    <min_year>2000</min_year>
+    <sequence/>
+    <min_year>1900</min_year>
     <max_year>9999</max_year>
+    <cache_size>5000</cache_size>
+    <preload_cache>N</preload_cache>
+    <use_start_date_alternative>Y</use_start_date_alternative>
+    <start_date_alternative>column_value</start_date_alternative>
+    <start_date_field_name>observed_date</start_date_field_name>
+    <GUI><xloc>480</xloc><yloc>120</yloc><draw>Y</draw></GUI>
   </step>
 </transformation>
