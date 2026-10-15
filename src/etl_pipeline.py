@@ -325,8 +325,12 @@ def main_genre(genres_text):
     return "Indie Only" if "Indie" in tags else "Other"
 
 
-def charts_hours_before(month_rows, cutoff_date):
-    """SteamCharts 月均在线 × 当月小时数，累加到截止日所在月份之前（不算不完整的当月）。"""
+def charts_hours_before(month_rows, cutoff_date, release_date=None):
+    """
+    SteamCharts 月均在线 × 当月小时数，累加到截止日所在月份之前（不算不完整的当月）。
+    坑：上架当月的"月均在线"是按上架后那几天平均的，第一版却乘了整月的小时数，
+    上架越晚的游戏首月被放大得越多（红色沙漠 3 月 19 日上架，放大约 2.4 倍）。现在上架当月只按上架后的天数算。
+    """
     cutoff_month = cutoff_date[:7]
     total = 0.0
     for month, avg in month_rows:
@@ -334,6 +338,8 @@ def charts_hours_before(month_rows, cutoff_date):
             continue
         y, m = map(int, month.split("-"))
         days = (dt.date(y + (m == 12), m % 12 + 1, 1) - dt.date(y, m, 1)).days
+        if release_date and month == release_date[:7]:
+            days = days - int(release_date[8:10]) + 1
         total += avg * days * 24
     return total
 
@@ -437,7 +443,7 @@ def clean_one(c, apps, reviews, charts, policy):
         rel_plus2 = (rel.replace(day=1) + dt.timedelta(days=62)).strftime("%Y-%m")
         if first_month <= rel_plus2 and first_month < c["cutoff_date"][:7]:
             coverage = 1
-            hours = charts_hours_before(month_rows, c["cutoff_date"])
+            hours = charts_hours_before(month_rows, c["cutoff_date"], release_date)
             if hours <= 0:
                 coverage, hours = 0, None
 
