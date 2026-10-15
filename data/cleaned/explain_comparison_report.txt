@@ -1,6 +1,17 @@
-=== 星型模型多表关联查询索引优化与 EXPLAIN 对比实验 ===
-1. 建索引前执行计划 (EXPLAIN QUERY PLAN): [(9, 0, 0, 'SCAN f'), (33, 0, 0, 'SEARCH dg USING INTEGER PRIMARY KEY (rowid=?)'), (36, 0, 0, 'SEARCH dge USING INTEGER PRIMARY KEY (rowid=?)'), (39, 0, 0, 'SEARCH dm USING INTEGER PRIMARY KEY (rowid=?)'), (42, 0, 0, 'USE TEMP B-TREE FOR GROUP BY')]
-   - 200次聚合查询总耗时: 173.86 ms (事实表执行全表扫描 SCAN f)
-2. 建索引后执行计划 (EXPLAIN QUERY PLAN): [(10, 0, 0, 'SEARCH f USING INDEX idx_fact_cohort_method (data_cohort=? AND method_code=?)'), (38, 0, 0, 'SEARCH dg USING INTEGER PRIMARY KEY (rowid=?)'), (41, 0, 0, 'SEARCH dge USING INTEGER PRIMARY KEY (rowid=?)'), (44, 0, 0, 'SEARCH dm USING INTEGER PRIMARY KEY (rowid=?)'), (47, 0, 0, 'USE TEMP B-TREE FOR GROUP BY')]
-   - 200次聚合查询总耗时: 125.59 ms (命中复合索引 SEARCH f USING INDEX idx_fact_cohort_method)
-3. 性能提升倍数: 1.38x
+=== 索引前后 EXPLAIN QUERY PLAN 与耗时对比（SQLite，本机实测，每次运行数字会略有不同）===
+事实表行数: 10921；同一条四表关联聚合查询重复执行 300 次
+建索引前执行计划:
+    SCAN f
+    SEARCH dg USING INTEGER PRIMARY KEY (rowid=?)
+    SEARCH dge USING INTEGER PRIMARY KEY (rowid=?)
+    SEARCH dm USING INTEGER PRIMARY KEY (rowid=?)
+    USE TEMP B-TREE FOR GROUP BY
+    耗时 303.7 ms
+建索引后执行计划:
+    SEARCH f USING INDEX idx_fact_cohort_method (cohort=? AND method_code=?)
+    SEARCH dg USING INTEGER PRIMARY KEY (rowid=?)
+    SEARCH dge USING INTEGER PRIMARY KEY (rowid=?)
+    SEARCH dm USING INTEGER PRIMARY KEY (rowid=?)
+    USE TEMP B-TREE FOR GROUP BY
+    耗时 158.2 ms
+提速倍数: 1.92x

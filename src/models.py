@@ -1,18 +1,23 @@
 # -*- coding: utf-8 -*-
 """
-Steam 游戏销量估算与智能分析系统 - 多模型训练、校准、双信号融合与数据库回写模块 (src/models.py)
-作者：Rex
-说明：
-1. 实现 M0 (固定倍数)、M1 (文献分段)、M2 (对数线性回归)、M3 (分位数回归区间)、M4 (随机森林/GBDT树模型)；
-2. 实现 2019 评测提示政策前后的年代校准（检验截距平移 vs 系数稳定性）；
-3. 实现信号 B（在线人数+人均时长）与 A+B 双信号融合，以及跨时代拆分公式检验；
-4. 所有估算结果、区间上下限、特征重要性与对比指标全部写回数据库星型模型事实表与汇总表。
+多方法销量估算、交叉验证、政策校准、双信号融合与结果回写 (src/models.py)
+
+两类样本：
+    train_2018：2018-07-01 泄露玩家数 + 截至当天的评测（只用 model_eligible=1 的，避开抽样截断）
+    truth     ：Gamalytic 测试表里 118 条有出处的公开销量 + 截至公布日的评测
+
+几条硬规矩（原版本就是在这里出的问题）：
+1. 任何模型输入都只来自接口采集的数据，绝不由真值反推；
+2. 2018 样本上的指标一律是 5 折交叉验证的"袋外"预测；
+3. 凡是要在真值集上拟合的参数（政策校准系数、融合权重），一律用留一法：
+   估计第 i 款游戏时，参数只用另外 n-1 款拟合，所以第 i 款的误差是真正的"没见过"的误差。
 """
+import json
 import time
 import math
-import shutil
 import sqlite3
 import pathlib
+
 import numpy as np
 import pandas as pd
 from scipy import stats
@@ -20,668 +25,678 @@ from scipy.optimize import minimize
 
 BASE_DIR = pathlib.Path(__file__).resolve().parent.parent
 DB_PATH = BASE_DIR / "data" / "steam_sales_dw.db"
-TMP_DB_PATH = BASE_DIR / "data" / "steam_sales_dw.db"
+CLEANED_DIR = BASE_DIR / "data" / "cleaned"
+RNG_SEED = 20261015
 
-np.random.seed(20261012)
+GENRES = ["Action", "Adventure", "RPG", "Strategy", "Simulation", "Casual", "Sports & Racing",
+          "Massively Multiplayer", "Indie Only", "Other"]
+POS_CENTER = 0.80  # 好评率二次项的中心，只为数值稳定，不影响拟合出的曲线形状
 
-
-def get_connection():
-    if DB_PATH.exists() and not TMP_DB_PATH.exists():
-        pass
-    conn = sqlite3.connect(str(TMP_DB_PATH))
-    conn.execute("PRAGMA journal_mode = MEMORY;")
-    conn.execute("PRAGMA synchronous = OFF;")
-    conn.execute("PRAGMA foreign_keys = ON;")
-    return conn
-
-
-def sync_db():
-    if TMP_DB_PATH.exists():
-        pass
+# Gamalytic 博客公布的、约 120 款游戏上各方法的 ±30% 命中率（只有这一列是原文给出的）
+GAMALYTIC_PUBLISHED = [
+    ("G_Fixed", "Gamalytic: 评测数×固定倍数", 42.74),
+    ("G_Adjusted", "Gamalytic: 评测数×修正倍数", 50.43),
+    ("G_CCU_Playtime", "Gamalytic: 在线人数+游玩时长", 64.44),
+    ("G_TopSeller", "Gamalytic: 热销榜排名", 61.40),
+    ("G_Profiles", "Gamalytic: 抽样公开玩家资料", 77.91),
+    ("G_Aggregated", "Gamalytic: 多方法加权", 76.92),
+]
 
 
 # ==============================================================================
-# 一、构建特征矩阵与辅助函数
+# 一、特征
 # ==============================================================================
-GENRE_LIST = ["Action", "RPG", "Strategy", "Simulation", "Adventure", "Indie", "Survival", "Sports"]
-
-
-def build_feature_matrix(df):
+def build_features(df, pt_fill):
     """
-    构造模型输入特征矩阵 X：
-    为什么包含 positive_rate 和 positive_rate_sq：
-    因为 Gamalytic 与 GameDiscoverCo 的实证研究表明好评率与 k 呈显著的“倒 U 形”关系（70%左右最高，两头低），
-    在线性模型中必须引入二次项 (pos_rate - 0.72)^2 或 pos_rate + pos_rate^2 才能表达倒 U 形曲率。
+    ln k 的解释变量。每一项为什么放进来：
+    - ln 价格：越贵买家越认真，评测意愿越高，k 越低（文献）
+    - 好评率及其平方：文献说好评率与 k 是倒 U 形
+    - ln 评测数：文献说评测很少和很多的游戏 k 都偏低
+    - ln 游戏年龄：老游戏多年来攒了慈善包、送 Key、免费周末的玩家，k 越老越高（我们自己的数据里很明显）
+    - 中文评测占比：文献矛盾，作为待检验特征
+    - Steam 内购买评测占比：越低说明激活码/赠送来的玩家越多，这些人写评测少（评测接口 purchase_type 拆出来的真实值）
+    - ln 评测者时长：玩得越久越愿意写评测
+    - 类型虚拟变量：以 Action 为基准
     """
     n = len(df)
-    log_price = np.log(np.maximum(df["price_usd"].values, 1.0))
-    pos_rate = df["positive_rate"].values
-    pos_rate_sq = (pos_rate - 0.72) ** 2
-    log_reviews = np.log(np.maximum(df["total_reviews"].values, 1.0))
-    rel_year_centered = np.minimum(df["release_year"].values, 2018) - 2012.0
-    sch_ratio = df["schinese_ratio"].values
-    log_playtime = np.log(np.maximum(df["avg_playtime_at_review_hrs"].values, 1.0))
-
-    # 类型 One-Hot 编码（以 Action 为基准参照组，避免完全共线性）
-    genre_dummies = []
-    for g in GENRE_LIST[1:]:
-        genre_dummies.append((df["genre"].values == g).astype(float))
-
-    X_core = np.column_stack([
+    pos = df["positive_rate"].values
+    pt = df["playtime_review_median_hrs"].fillna(pt_fill).clip(lower=0.1).values
+    cols = [
         np.ones(n),
-        log_price,
-        pos_rate,
-        pos_rate_sq,
-        log_reviews,
-        rel_year_centered,
-        sch_ratio,
-        log_playtime,
-    ] + genre_dummies)
+        df["log_price"].values,
+        pos - POS_CENTER,
+        (pos - POS_CENTER) ** 2,
+        df["log_reviews"].values,
+        np.log(df["game_age_years"].values),
+        df["schinese_ratio"].values,
+        df["steam_purchase_ratio"].values,
+        np.log(pt),
+        df["is_indie"].values.astype(float),
+    ]
+    names = [
+        ("intercept", "截距"),
+        ("log_price", "ln 价格"),
+        ("positive_rate_c", "好评率 - 0.8"),
+        ("positive_rate_sq", "(好评率 - 0.8)²"),
+        ("log_reviews", "ln 评测数"),
+        ("log_age", "ln 游戏年龄(年)"),
+        ("schinese_ratio", "简中评测占比"),
+        ("steam_purchase_ratio", "Steam 内购买评测占比"),
+        ("log_playtime", "ln 评测者时长中位数"),
+        ("is_indie", "是否独立游戏"),
+    ]
+    for g in GENRES[1:]:
+        cols.append((df["genre"].values == g).astype(float))
+        names.append((f"genre_{g}", f"类型: {g}"))
+    return np.column_stack(cols), names
 
-    feat_names = [
-        ("intercept", "截距项 (常数基准 ln k)"),
-        ("log_price", "价格对数 ln(Price)"),
-        ("positive_rate", "好评率线性项 (PosRate)"),
-        ("positive_rate_sq", "好评率二次项 (PosRate - 0.72)² [倒U形]"),
-        ("log_reviews", "评测规模对数 ln(Reviews)"),
-        ("release_year_c", "发售年份 (Year - 2012)"),
-        ("schinese_ratio", "简体中文评测占比 (SChinese%)"),
-        ("log_playtime", "评测时游玩时长对数 ln(Playtime)"),
-    ] + [(f"genre_{g}", f"类型虚拟变量：{g}") for g in GENRE_LIST[1:]]
 
-    return X_core, feat_names
-
-
-def fit_ols_with_inference(X, y):
-    """使用最小二乘法拟合对数线性模型 M2，并计算标准误、t 统计量、p 值与 R²"""
+# ==============================================================================
+# 二、M2 最小二乘 / M3 分位数回归
+# ==============================================================================
+def fit_ols(X, y):
     n, p = X.shape
     beta, _, _, _ = np.linalg.lstsq(X, y, rcond=None)
-    y_hat = X @ beta
-    residuals = y - y_hat
-    rss = float(np.sum(residuals ** 2))
-    tss = float(np.sum((y - np.mean(y)) ** 2))
-    r2 = 1.0 - rss / tss
-    adj_r2 = 1.0 - (1.0 - r2) * (n - 1) / (n - p)
+    resid = y - X @ beta
+    rss = float(resid @ resid)
+    tss = float(((y - y.mean()) ** 2).sum())
     sigma2 = rss / (n - p)
-    cov_beta = sigma2 * np.linalg.pinv(X.T @ X)
-    std_err = np.sqrt(np.maximum(np.diag(cov_beta), 1e-12))
-    t_stats = beta / std_err
-    p_vals = 2.0 * (1.0 - stats.t.cdf(np.abs(t_stats), df=n - p))
-    return {
-        "beta": beta,
-        "std_err": std_err,
-        "t_stats": t_stats,
-        "p_vals": p_vals,
-        "r2": r2,
-        "adj_r2": adj_r2,
-        "residuals": residuals,
-        "sigma": math.sqrt(sigma2)
-    }
+    cov = sigma2 * np.linalg.pinv(X.T @ X)
+    se = np.sqrt(np.maximum(np.diag(cov), 1e-12))
+    t = beta / se
+    pv = 2 * (1 - stats.t.cdf(np.abs(t), df=n - p))
+    return {"beta": beta, "se": se, "t": t, "p": pv, "r2": 1 - rss / tss, "resid": resid}
 
 
-def fit_quantile_regression(X, y, tau=0.5):
-    """
-    M3 分位数回归：最小化非对称 Pinball Loss (倾斜绝对值损失)
-    用于直接估计 ln(k) 的中位数 (tau=0.5)、下界 (tau=0.1) 与上界 (tau=0.9)
-    """
-    init_beta, _, _, _ = np.linalg.lstsq(X, y, rcond=None)
+def fit_quantile(X, y, tau):
+    """最小化分位数损失（pinball loss）。用 OLS 结果当初值，Powell 法不需要梯度，对折线损失更稳。"""
+    b0, _, _, _ = np.linalg.lstsq(X, y, rcond=None)
 
-    def pinball_loss(b):
+    def loss(b):
         u = y - X @ b
-        return np.mean(np.where(u >= 0, tau * u, (tau - 1.0) * u)) + 1e-4 * np.sum(b[1:] ** 2)
+        return np.mean(np.maximum(tau * u, (tau - 1) * u))
 
-    res = minimize(pinball_loss, init_beta, method="BFGS", options={"maxiter": 400})
+    res = minimize(loss, b0, method="Powell", options={"maxiter": 20000, "xtol": 1e-6, "ftol": 1e-9})
     return res.x
 
 
 # ==============================================================================
-# 二、手写实现轻量级 CART 回归树、随机森林 (Random Forest) 与梯度提升树 (GBDT)
-# 为什么手写实现：不依赖外部黑盒库，原理透明，且能在报告详细设计章节完整讲清楚节点分裂与特征重要性的计算过程
+# 三、M4 手写 CART 回归树、随机森林、梯度提升树
+# 为什么手写：不依赖 sklearn 等黑盒库，答辩时能讲清楚每个节点怎么分裂、特征重要性怎么来的
 # ==============================================================================
 class SimpleCARTTree:
-    def __init__(self, max_depth=4, min_samples_leaf=8, max_features=None):
+    def __init__(self, max_depth=4, min_samples_leaf=8, max_features=None, rng=None):
         self.max_depth = max_depth
         self.min_samples_leaf = min_samples_leaf
         self.max_features = max_features
+        self.rng = rng or np.random.default_rng(0)
         self.tree = None
         self.feat_gains = None
 
     def fit(self, X, y):
-        n_samples, n_features = X.shape
-        self.feat_gains = np.zeros(n_features)
-        self.tree = self._build_tree(X, y, depth=0)
+        self.feat_gains = np.zeros(X.shape[1])
+        self.tree = self._build(X, y, 0)
         return self
 
-    def _build_tree(self, X, y, depth):
-        n_samples, n_features = X.shape
-        if depth >= self.max_depth or n_samples < 2 * self.min_samples_leaf or np.var(y) < 1e-7:
-            return {"is_leaf": True, "val": float(np.mean(y))}
-
-        feat_indices = np.arange(n_features)
-        if self.max_features is not None and self.max_features < n_features:
-            feat_indices = np.random.choice(n_features, self.max_features, replace=False)
-
-        best_gain = 0.0
-        best_feat = None
-        best_thresh = None
-        parent_sse = np.sum((y - np.mean(y)) ** 2)
-
-        for f_idx in feat_indices:
-            col = X[:, f_idx]
-            quantiles = np.unique(np.percentile(col, [15, 30, 45, 50, 60, 75, 85]))
-            for thresh in quantiles:
-                left_mask = col <= thresh
-                n_left = np.sum(left_mask)
-                n_right = n_samples - n_left
-                if n_left < self.min_samples_leaf or n_right < self.min_samples_leaf:
+    def _build(self, X, y, depth):
+        n, p = X.shape
+        if depth >= self.max_depth or n < 2 * self.min_samples_leaf or np.var(y) < 1e-9:
+            return {"leaf": True, "val": float(np.mean(y))}
+        feats = np.arange(p)
+        if self.max_features and self.max_features < p:
+            feats = self.rng.choice(p, self.max_features, replace=False)
+        parent_sse = float(((y - y.mean()) ** 2).sum())
+        best = (0.0, None, None)
+        for f in feats:
+            col = X[:, f]
+            # 候选切分点只取若干分位数，速度快很多，效果差别不大
+            for thr in np.unique(np.percentile(col, [10, 20, 30, 40, 50, 60, 70, 80, 90])):
+                left = col <= thr
+                nl = int(left.sum())
+                if nl < self.min_samples_leaf or n - nl < self.min_samples_leaf:
                     continue
-                y_l, y_r = y[left_mask], y[~left_mask]
-                sse_split = np.sum((y_l - np.mean(y_l)) ** 2) + np.sum((y_r - np.mean(y_r)) ** 2)
-                gain = parent_sse - sse_split
-                if gain > best_gain:
-                    best_gain = gain
-                    best_feat = f_idx
-                    best_thresh = float(thresh)
+                yl, yr = y[left], y[~left]
+                gain = parent_sse - float(((yl - yl.mean()) ** 2).sum() + ((yr - yr.mean()) ** 2).sum())
+                if gain > best[0]:
+                    best = (gain, f, float(thr))
+        if best[1] is None:
+            return {"leaf": True, "val": float(np.mean(y))}
+        gain, f, thr = best
+        self.feat_gains[f] += gain
+        left = X[:, f] <= thr
+        return {"leaf": False, "f": f, "thr": thr,
+                "l": self._build(X[left], y[left], depth + 1), "r": self._build(X[~left], y[~left], depth + 1)}
 
-        if best_feat is None:
-            return {"is_leaf": True, "val": float(np.mean(y))}
-
-        self.feat_gains[best_feat] += best_gain
-        left_mask = X[:, best_feat] <= best_thresh
-        return {
-            "is_leaf": False,
-            "feat": best_feat,
-            "thresh": best_thresh,
-            "left": self._build_tree(X[left_mask], y[left_mask], depth + 1),
-            "right": self._build_tree(X[~left_mask], y[~left_mask], depth + 1),
-        }
-
-    def _predict_one(self, node, x_row):
-        if node["is_leaf"]:
-            return node["val"]
-        if x_row[node["feat"]] <= node["thresh"]:
-            return self._predict_one(node["left"], x_row)
-        else:
-            return self._predict_one(node["right"], x_row)
+    def _one(self, node, x):
+        while not node["leaf"]:
+            node = node["l"] if x[node["f"]] <= node["thr"] else node["r"]
+        return node["val"]
 
     def predict(self, X):
-        return np.array([self._predict_one(self.tree, row) for row in X])
+        return np.array([self._one(self.tree, x) for x in X])
 
 
-class RandomForestRegressorCustom:
-    def __init__(self, n_estimators=60, max_depth=5, min_samples_leaf=6):
-        self.n_estimators = n_estimators
-        self.max_depth = max_depth
-        self.min_samples_leaf = min_samples_leaf
-        self.trees = []
-        self.feature_importances_ = None
+class RandomForest:
+    def __init__(self, n_estimators=60, max_depth=6, min_samples_leaf=10, seed=0):
+        self.n_estimators, self.max_depth, self.min_samples_leaf = n_estimators, max_depth, min_samples_leaf
+        self.rng = np.random.default_rng(seed)
 
     def fit(self, X, y):
-        n_samples, n_features = X.shape
-        max_f = max(2, int(round(n_features * 0.75)))
-        self.trees = []
-        total_gains = np.zeros(n_features)
+        n, p = X.shape
+        self.trees, gains = [], np.zeros(p)
         for _ in range(self.n_estimators):
-            boot_idx = np.random.choice(n_samples, n_samples, replace=True)
-            tree = SimpleCARTTree(max_depth=self.max_depth, min_samples_leaf=self.min_samples_leaf, max_features=max_f)
-            tree.fit(X[boot_idx], y[boot_idx])
-            self.trees.append(tree)
-            total_gains += tree.feat_gains
-        self.feature_importances_ = total_gains / np.maximum(np.sum(total_gains), 1e-12)
+            idx = self.rng.integers(0, n, n)  # 有放回抽样
+            t = SimpleCARTTree(self.max_depth, self.min_samples_leaf, max(2, int(p * 0.6)), self.rng).fit(X[idx], y[idx])
+            self.trees.append(t)
+            gains += t.feat_gains
+        self.feature_importances_ = gains / max(gains.sum(), 1e-12)
         return self
 
     def predict(self, X):
-        preds = np.column_stack([t.predict(X) for t in self.trees])
-        return np.mean(preds, axis=1)
+        return np.mean([t.predict(X) for t in self.trees], axis=0)
 
 
-class GBDTRegressorCustom:
-    def __init__(self, n_estimators=55, learning_rate=0.08, max_depth=3, min_samples_leaf=8):
-        self.n_estimators = n_estimators
-        self.learning_rate = learning_rate
-        self.max_depth = max_depth
-        self.min_samples_leaf = min_samples_leaf
-        self.base_val = 0.0
-        self.trees = []
-        self.feature_importances_ = None
+class GBDT:
+    def __init__(self, n_estimators=80, learning_rate=0.06, max_depth=3, min_samples_leaf=12, seed=0):
+        self.n_estimators, self.lr, self.max_depth, self.min_samples_leaf = n_estimators, learning_rate, max_depth, min_samples_leaf
+        self.rng = np.random.default_rng(seed)
 
     def fit(self, X, y):
-        n_samples, n_features = X.shape
-        self.base_val = float(np.mean(y))
-        y_pred = np.full(n_samples, self.base_val)
-        self.trees = []
-        total_gains = np.zeros(n_features)
+        self.base = float(np.mean(y))
+        pred = np.full(len(y), self.base)
+        self.trees, gains = [], np.zeros(X.shape[1])
         for _ in range(self.n_estimators):
-            residual = y - y_pred
-            tree = SimpleCARTTree(max_depth=self.max_depth, min_samples_leaf=self.min_samples_leaf, max_features=n_features)
-            tree.fit(X, residual)
-            self.trees.append(tree)
-            y_pred += self.learning_rate * tree.predict(X)
-            total_gains += tree.feat_gains
-        self.feature_importances_ = total_gains / np.maximum(np.sum(total_gains), 1e-12)
+            t = SimpleCARTTree(self.max_depth, self.min_samples_leaf, None, self.rng).fit(X, y - pred)  # 拟合残差
+            pred += self.lr * t.predict(X)
+            self.trees.append(t)
+            gains += t.feat_gains
+        self.feature_importances_ = gains / max(gains.sum(), 1e-12)
         return self
 
     def predict(self, X):
-        y_pred = np.full(len(X), self.base_val)
-        for t in self.trees:
-            y_pred += self.learning_rate * t.predict(X)
-        return y_pred
+        return self.base + self.lr * np.sum([t.predict(X) for t in self.trees], axis=0)
 
 
-def calc_metrics(y_true_sales, y_est_sales, y_true_log=None, y_est_log=None):
-    ape = np.abs(y_est_sales - y_true_sales) / np.maximum(y_true_sales, 1.0)
-    mape = float(np.mean(ape) * 100.0)
-    mdape = float(np.median(ape) * 100.0)
-    hit10 = float(np.mean(ape <= 0.10) * 100.0)
-    hit30 = float(np.mean(ape <= 0.30) * 100.0)
-    hit50 = float(np.mean(ape <= 0.50) * 100.0)
-    r2_log = 0.0
-    if y_true_log is not None and y_est_log is not None:
-        tss = np.sum((y_true_log - np.mean(y_true_log)) ** 2)
-        rss = np.sum((y_true_log - y_est_log) ** 2)
-        r2_log = float(1.0 - rss / max(tss, 1e-12))
-    return {
-        "mape_pct": round(mape, 2),
-        "mdape_pct": round(mdape, 2),
-        "r2_log": round(r2_log, 4),
-        "hit_rate_10pct": round(hit10, 2),
-        "hit_rate_30pct": round(hit30, 2),
-        "hit_rate_50pct": round(hit50, 2),
-    }
+class TreeEnsemble:
+    """M4 = 随机森林和梯度提升树的预测取平均。"""
+
+    def __init__(self, seed=0):
+        self.rf = RandomForest(seed=seed)
+        self.gb = GBDT(seed=seed + 1)
+
+    def fit(self, X, y):
+        self.rf.fit(X, y)
+        self.gb.fit(X, y)
+        return self
+
+    def predict(self, X):
+        return 0.5 * self.rf.predict(X) + 0.5 * self.gb.predict(X)
+
+
+# ==============================================================================
+# 四、指标
+# ==============================================================================
+def metrics(y_true, y_est):
+    y_true = np.asarray(y_true, float)
+    y_est = np.asarray(y_est, float)
+    ape = np.abs(y_est - y_true) / y_true
+    lt, le = np.log(y_true), np.log(np.maximum(y_est, 1))
+    r2 = 1 - ((lt - le) ** 2).sum() / max(((lt - lt.mean()) ** 2).sum(), 1e-12)
+    return {"n": len(y_true), "mape": 100 * ape.mean(), "mdape": 100 * np.median(ape), "r2_log": r2,
+            "hit10": 100 * (ape <= 0.10).mean(), "hit30": 100 * (ape <= 0.30).mean(), "hit50": 100 * (ape <= 0.50).mean()}
+
+
+# ==============================================================================
+# 五、政策校准：政策上线后每条评测对应的销量是之前的 r 倍
+#     估算销量 = k_前 × (政策前评测数 + r × 政策后评测数)
+# ==============================================================================
+def fit_policy_r(k_pre, n_before, n_after, y_true):
+    """一维搜索 r，使对数误差平方和最小。只有政策后评测数 > 0 的样本才对 r 有信息。"""
+    mask = n_after > 0
+    if mask.sum() < 3:
+        return 1.0
+    grid = np.exp(np.linspace(np.log(0.05), np.log(2.0), 400))
+    best_r, best_loss = 1.0, np.inf
+    for r in grid:
+        est = k_pre[mask] * (n_before[mask] + r * n_after[mask])
+        loss = float(((np.log(y_true[mask]) - np.log(est)) ** 2).sum())
+        if loss < best_loss:
+            best_r, best_loss = r, loss
+    return float(best_r)
+
+
+def loo_policy_estimates(k_pre, n_before, n_after, y_true):
+    """留一法：第 i 款的 r 只用其余样本估计。返回每款的估算销量和各自用到的 r。"""
+    n = len(y_true)
+    est, rs = np.zeros(n), np.zeros(n)
+    for i in range(n):
+        keep = np.arange(n) != i
+        r = fit_policy_r(k_pre[keep], n_before[keep], n_after[keep], y_true[keep])
+        rs[i] = r
+        est[i] = k_pre[i] * (n_before[i] + r * n_after[i])
+    return est, rs
+
+
+def recal_design(df, X):
+    """
+    近年校准的设计矩阵：截距 + 政策后评测占比 + 9 个核心特征（不含类型虚拟变量）。
+    含义：ln k_真值 = ln k_2018模型(x) + γ0 + δ·政策后评测占比 + γ·x
+      - γ0：玩家数 -> 销量的整体换算，以及年代整体差异
+      - δ ：政策后评测占比越高 k 越低，全是政策后评测时相当于 k 乘 exp(δ)
+      - γ ：哪些特征的作用在"2018 玩家数"和"近年销量"之间变了（设计文档 3.6 节第二种情况）
+    """
+    s_after = df["reviews_after_policy"].values / df["total_reviews"].values
+    return np.column_stack([np.ones(len(df)), s_after, X[:, 1:10]])
+
+
+def fit_recal(Z, offset, y_lk):
+    w, _, _, _ = np.linalg.lstsq(Z, y_lk - offset, rcond=None)
+    return w
+
+
+def loo_recal(Z, offset, y_lk):
+    """留一法：第 i 款的校准系数只用其余 n-1 款拟合。返回 ln k 的预测。"""
+    n = len(y_lk)
+    out = np.zeros(n)
+    for i in range(n):
+        keep = np.arange(n) != i
+        w = fit_recal(Z[keep], offset[keep], y_lk[keep])
+        out[i] = offset[i] + Z[i] @ w
+    return out
+
+
+def nested_loo_fusion(Z, off_a, y_lk, log_n, log_b, has_b):
+    """
+    嵌套留一法融合：估第 i 款时，
+      1) 用其余 n-1 款拟合信号 A 的近年校准；
+      2) 用这套校准算出其余 n-1 款的 ln Y_A，再在其中"有信号 B"的样本上拟合 ln Y = v0 + vA ln Y_A + vB ln Y_B；
+      3) 用 1) 2) 的参数估第 i 款。
+    这样第 i 款的真值在任何一步都没被用到。没有信号 B 的样本直接用校准后的信号 A。
+    """
+    n = len(y_lk)
+    y_log = y_lk + log_n
+    out, weights = np.zeros(n), []
+    for i in range(n):
+        keep = np.arange(n) != i
+        w = fit_recal(Z[keep], off_a[keep], y_lk[keep])
+        ln_a_all = log_n + off_a + Z @ w
+        if not has_b[i]:
+            out[i] = ln_a_all[i]
+            continue
+        kb = keep & has_b
+        F = np.column_stack([np.ones(kb.sum()), ln_a_all[kb], log_b[kb]])
+        v, _, _, _ = np.linalg.lstsq(F, y_log[kb], rcond=None)
+        out[i] = v[0] + v[1] * ln_a_all[i] + v[2] * log_b[i]
+        weights.append(v)
+    return out, np.array(weights)
+
+
+# ==============================================================================
+# 六、主流程
+# ==============================================================================
+def m1_k(year):
+    if year <= 2016:
+        return 74.0
+    if year <= 2018:
+        return 60.0
+    if year == 2019:
+        return 51.0
+    return 38.0
+
+
+def kfold_indices(n, k, seed):
+    idx = np.random.default_rng(seed).permutation(n)
+    return np.array_split(idx, k)
 
 
 def run_all_models():
-    conn = get_connection()
-    df_all = pd.read_sql_query("SELECT * FROM dwd_steam_game_aligned ORDER BY appid ASC", conn)
-    df_2018 = df_all[df_all["data_cohort"] == "train_2018"].copy().reset_index(drop=True)
-    df_2020 = df_all[df_all["data_cohort"] == "modern_2020"].copy().reset_index(drop=True)
-    df_cross = df_all[df_all["data_cohort"] == "cross_era"].copy().reset_index(drop=True)
+    t_start = time.time()
+    conn = sqlite3.connect(str(DB_PATH))
+    conn.execute("PRAGMA foreign_keys = ON;")
+    df = pd.read_sql_query("SELECT * FROM dwd_game_sample ORDER BY sample_id", conn)
+    tr = df[(df["cohort"] == "train_2018") & (df["model_eligible"] == 1)].reset_index(drop=True)
+    te = df[df["cohort"] == "truth"].reset_index(drop=True)
+    print(f"[建模] 2018 训练样本 {len(tr)}，真值样本 {len(te)}", flush=True)
 
-    print(f"[建模] 2018训练集: {len(df_2018)} 款, 2020+近年真值集: {len(df_2020)} 款, 跨时代检验集: {len(df_cross)} 款")
+    pt_fill = float(tr["playtime_review_median_hrs"].median())
+    X_tr, feat_names = build_features(tr, pt_fill)
+    X_te, _ = build_features(te, pt_fill)
+    y_tr = tr["log_k"].values
 
-    # 1. 构建特征矩阵并拟合 M2 (OLS 对数线性回归) 与 M3 (分位数回归)
-    X_2018, feat_names = build_feature_matrix(df_2018)
-    y_2018_log_k = df_2018["log_k"].values
+    # ---------------- 2018 上 5 折交叉验证 ----------------
+    folds = kfold_indices(len(tr), 5, RNG_SEED)
+    oof = {m: np.zeros(len(tr)) for m in ["M2", "M3", "M3_lo", "M3_hi", "M4"]}
+    for fi, val in enumerate(folds):
+        trn = np.setdiff1d(np.arange(len(tr)), val)
+        b = fit_ols(X_tr[trn], y_tr[trn])["beta"]
+        oof["M2"][val] = X_tr[val] @ b
+        for tau, key in [(0.5, "M3"), (0.1, "M3_lo"), (0.9, "M3_hi")]:
+            oof[key][val] = X_tr[val] @ fit_quantile(X_tr[trn], y_tr[trn], tau)
+        oof["M4"][val] = TreeEnsemble(seed=fi).fit(X_tr[trn][:, 1:], y_tr[trn]).predict(X_tr[val][:, 1:])
+        print(f"[建模] 第 {fi + 1}/5 折完成", flush=True)
 
-    ols_res = fit_ols_with_inference(X_2018, y_2018_log_k)
-    beta_m2 = ols_res["beta"]
-    beta_q10 = fit_quantile_regression(X_2018, y_2018_log_k, tau=0.10)
-    beta_q50 = fit_quantile_regression(X_2018, y_2018_log_k, tau=0.50)
-    beta_q90 = fit_quantile_regression(X_2018, y_2018_log_k, tau=0.90)
-
-    # 2. 拟合 M4 树模型（去掉常数列，用真实特征训练随机森林与 GBDT）
-    X_2018_tree = X_2018[:, 1:]
-    rf_model = RandomForestRegressorCustom(n_estimators=60, max_depth=5, min_samples_leaf=6).fit(X_2018_tree, y_2018_log_k)
-    gbdt_model = GBDTRegressorCustom(n_estimators=55, learning_rate=0.08, max_depth=3, min_samples_leaf=8).fit(X_2018_tree, y_2018_log_k)
-
-    # 3. 在 2018 数据集上执行 5 折交叉验证 (5-Fold Cross Validation)
-    n_2018 = len(df_2018)
-    indices = np.arange(n_2018)
-    np.random.shuffle(indices)
-    folds = np.array_split(indices, 5)
-
-    cv_preds_log_k = {
-        "M2": np.zeros(n_2018),
-        "M3": np.zeros(n_2018),
-        "M4": np.zeros(n_2018),
+    # ---------------- 全量 2018 拟合（给真值集用） ----------------
+    ols = fit_ols(X_tr, y_tr)
+    q = {tau: fit_quantile(X_tr, y_tr, tau) for tau in (0.1, 0.5, 0.9)}
+    tree = TreeEnsemble(seed=99).fit(X_tr[:, 1:], y_tr)
+    k_pre = {
+        "M2": np.exp(X_te @ ols["beta"]),
+        "M3": np.exp(X_te @ q[0.5]), "M3_lo": np.exp(X_te @ q[0.1]), "M3_hi": np.exp(X_te @ q[0.9]),
+        "M4": np.exp(tree.predict(X_te[:, 1:])),
     }
-    for fold_idx in range(5):
-        val_idx = folds[fold_idx]
-        tr_idx = np.setdiff1d(indices, val_idx)
-        ols_f = fit_ols_with_inference(X_2018[tr_idx], y_2018_log_k[tr_idx])
-        q50_f = fit_quantile_regression(X_2018[tr_idx], y_2018_log_k[tr_idx], tau=0.50)
-        rf_f = RandomForestRegressorCustom(n_estimators=40, max_depth=5, min_samples_leaf=6).fit(X_2018_tree[tr_idx], y_2018_log_k[tr_idx])
-        gb_f = GBDTRegressorCustom(n_estimators=45, learning_rate=0.08, max_depth=3, min_samples_leaf=8).fit(X_2018_tree[tr_idx], y_2018_log_k[tr_idx])
 
-        cv_preds_log_k["M2"][val_idx] = X_2018[val_idx] @ ols_f["beta"]
-        cv_preds_log_k["M3"][val_idx] = X_2018[val_idx] @ q50_f
-        cv_preds_log_k["M4"][val_idx] = 0.45 * rf_f.predict(X_2018_tree[val_idx]) + 0.55 * gb_f.predict(X_2018_tree[val_idx])
+    # ---------------- 信号 B：总游玩小时 ÷ 人均小时 ----------------
+    # 人均小时 = exp(a + b·ln 评测者时长)，a、b 用 2018 年"总小时 ÷ 真实玩家数"拟合；2018 上也做 5 折
+    trb = tr[(tr["charts_coverage"] == 1) & tr["playtime_review_median_hrs"].notna()].reset_index(drop=True)
+    lh = np.log(trb["charts_total_hours"].values / trb["truth_value"].values)
+    lp = np.log(trb["playtime_review_median_hrs"].clip(lower=0.1).values)
+    Zb = np.column_stack([np.ones(len(trb)), lp])
+    ab, _, _, _ = np.linalg.lstsq(Zb, lh, rcond=None)
+    oof_b = np.zeros(len(trb))
+    for val in kfold_indices(len(trb), 5, RNG_SEED + 1):
+        trn = np.setdiff1d(np.arange(len(trb)), val)
+        w, _, _, _ = np.linalg.lstsq(Zb[trn], lh[trn], rcond=None)
+        oof_b[val] = trb["charts_total_hours"].values[val] / np.exp(Zb[val] @ w)
+    oof_b_map = dict(zip(trb["sample_id"], oof_b))
+    print(f"[信号B] ln(人均小时) = {ab[0]:.3f} + {ab[1]:.3f}·ln(评测者时长)，2018 可用样本 {len(trb)}", flush=True)
 
-    # 4. 年代修正（模型校准，对应设计文档 3.6 节）
-    # 用 2018 学到的模型直接预测 2020+ 游戏，看 ln(真实销量/未校准估算销量) 的偏差分布
-    X_2020, _ = build_feature_matrix(df_2020)
-    X_2020_tree = X_2020[:, 1:]
-    raw_m2_log_k_2020 = X_2020 @ beta_m2
-    raw_m4_log_k_2020 = 0.45 * rf_model.predict(X_2020_tree) + 0.55 * gbdt_model.predict(X_2020_tree)
+    has_b_te = ((te["charts_coverage"] == 1) & te["playtime_review_median_hrs"].notna()).values
+    y_b_te = np.full(len(te), np.nan)
+    pt_te = te["playtime_review_median_hrs"].clip(lower=0.1).values
+    y_b_te[has_b_te] = te["charts_total_hours"].values[has_b_te] / np.exp(ab[0] + ab[1] * np.log(pt_te[has_b_te]))
 
-    # 计算系统性水平截距偏移 delta_log_k = mean(ln(k_真值) - ln(k_2018模型未校准))
-    delta_m2 = float(np.mean(df_2020["log_k"].values - raw_m2_log_k_2020))
-    delta_m4 = float(np.mean(df_2020["log_k"].values - raw_m4_log_k_2020))
-    ratio_shift_m2 = math.exp(delta_m2)
-    print(f"[年代校准] 2019政策后对数截距偏移 delta_m2 = {delta_m2:.4f} (相当于整体倍数缩放 {ratio_shift_m2:.2f} 倍，验证了‘2019年后k约减半’的假设)")
+    # ---------------- 真值集：先看"直接迁移"，再做近年校准（都用留一法） ----------------
+    y_true_te = te["truth_value"].values.astype(float)
+    nb = te["reviews_before_policy"].values.astype(float)
+    na = te["reviews_after_policy"].values.astype(float)
+    pol = json.loads((BASE_DIR / "data" / "raw" / "policy_change_detected.json").read_text(encoding="utf-8"))
+    r_scan = 1.0 / pol["jump_ratio"]
 
-    # 5. 信号 B（在线人数 + 人均游玩时长推算）与 A+B 双信号融合（对应设计文档 3.4 节）
-    # 在 2018 数据上反推评测者时长偏差系数 alpha = avg_playtime_at_review / true_avg_playtime
-    implied_true_hrs_2018 = df_2018["steamcharts_total_player_hours"].values / np.maximum(df_2018["true_sales_or_players"].values, 1.0)
-    reviewer_bias_alpha = float(np.median(df_2018["avg_playtime_at_review_hrs"].values / np.maximum(implied_true_hrs_2018, 0.1)))
-    print(f"[信号B校准] 评测作者游玩时长偏差系数 alpha = {reviewer_bias_alpha:.3f} (写评测的玩家平均比普通买家多玩 {(reviewer_bias_alpha-1)*100:.1f}%)")
+    # (1) 直接迁移：2018 模型 + 一个政策系数 r（设计文档 3.4 节的拆分公式），r 有四种取法
+    transfer = {
+        "M2_no_calib": k_pre["M2"] * (nb + na),
+        "M2_r_lit": k_pre["M2"] * (nb + 0.5 * na),
+        "M2_r_scan": k_pre["M2"] * (nb + r_scan * na),
+    }
+    transfer["M2_r_loo"], r_used = loo_policy_estimates(k_pre["M2"], nb, na, y_true_te)
+    r_full = fit_policy_r(k_pre["M2"], nb, na, y_true_te)
 
-    # 6. 为所有数据集（train_2018, modern_2020, cross_era）生成 7 种方法的完整估算并写入 fact_sales_estimation
-    game_key_map = dict(conn.execute("SELECT appid, game_key FROM dim_game").fetchall())
-    genre_id_map = dict(conn.execute("SELECT genre_name, genre_id FROM dim_genre").fetchall())
+    # (2) 近年校准：残差检验发现比值随特征变化（见 ads_policy_calibration），按 3.6 节用近年真值重估系数
+    y_lk_te = np.log(y_true_te / te["total_reviews"].values)
+    log_n_te = np.log(te["total_reviews"].values)
+    Z = recal_design(te, X_te)
+    est_te = {}
+    for m in ["M2", "M4"]:
+        est_te[m] = np.exp(log_n_te + loo_recal(Z, np.log(k_pre[m]), y_lk_te))
+    # M3：中位数沿用 M2 的校准；区间宽度取 2018 分位数回归的 10%/90% 与 50% 之差
+    est_te["M3"] = est_te["M2"]
+    est_te["M3_lo"] = est_te["M2"] * k_pre["M3_lo"] / k_pre["M3"]
+    est_te["M3_hi"] = est_te["M2"] * k_pre["M3_hi"] / k_pre["M3"]
+    w_recal_full = fit_recal(Z, np.log(k_pre["M2"]), y_lk_te)
 
-    X_all, _ = build_feature_matrix(df_all)
-    X_all_tree = X_all[:, 1:]
+    # ---------------- 融合（嵌套留一法） ----------------
+    log_b = np.log(np.where(has_b_te, y_b_te, 1.0))
+    fused_log, w_list = nested_loo_fusion(Z, np.log(k_pre["M4"]), y_lk_te, log_n_te, log_b, has_b_te)
+    est_te["Fusion_AB"] = np.exp(fused_log)
+    w_m4_full = fit_recal(Z, np.log(k_pre["M4"]), y_lk_te)
+    ln_a_full = log_n_te + np.log(k_pre["M4"]) + Z @ w_m4_full
+    Ff = np.column_stack([np.ones(has_b_te.sum()), ln_a_full[has_b_te], log_b[has_b_te]])
+    w_full, _, _, _ = np.linalg.lstsq(Ff, np.log(y_true_te[has_b_te]), rcond=None)
+    print(f"[直接迁移] 政策系数 r：留一法全样本 {r_full:.3f}，评测量跳升倒数 {r_scan:.3f}，文献 0.5", flush=True)
+    print(f"[近年校准] M2 校准中政策后评测占比的系数 δ={w_recal_full[1]:.3f}（相当于 k × {math.exp(w_recal_full[1]):.3f}）", flush=True)
+    print(f"[融合] 全样本权重 ln Y = {w_full[0]:.3f} + {w_full[1]:.3f} ln Y_A + {w_full[2]:.3f} ln Y_B "
+          f"（评估用的是嵌套留一法）", flush=True)
 
-    # 先计算信号 A (M4 年代校准后 + 跨时代拆分公式) 与信号 B 在全表上的预测，用于拟合融合权重
-    # 在近年真值集上用留一法/岭回归学习 w0, wA, wB: log(Y) = w0 + wA*log(Y_A) + wB*log(Y_B)
-    est_A_2020 = df_2020["total_reviews"].values * np.exp(raw_m4_log_k_2020 + delta_m4)
-    avg_hrs_2020 = np.maximum(df_2020["steamspy_avg_forever_min"].values / 60.0, 0.5)
-    est_B_2020 = df_2020["steamcharts_total_player_hours"].values / avg_hrs_2020
-
-    Z_2020 = np.column_stack([np.ones(len(df_2020)), np.log(est_A_2020), np.log(est_B_2020)])
-    w_fusion, _, _, _ = np.linalg.lstsq(Z_2020, np.log(df_2020["true_sales_or_players"].values), rcond=None)
-    print(f"[双信号融合] 融合公式: ln(Y_hat) = {w_fusion[0]:.3f} + {w_fusion[1]:.3f}·ln(玩家数_A) + {w_fusion[2]:.3f}·ln(玩家数_B)")
+    # ---------------- 写事实表 ----------------
+    game_key = dict(conn.execute("SELECT appid, game_key FROM dim_game").fetchall())
+    genre_id = dict(conn.execute("SELECT genre_name, genre_id FROM dim_genre").fetchall())
+    # 区间：用 2018 交叉验证残差的 10%/90% 分位（M3 自带分位数区间）
+    resid_q = {}
+    for m in ["M2", "M4"]:
+        r_ = y_tr - oof[m]
+        resid_q[m] = (float(np.exp(np.percentile(r_, 10))), float(np.exp(np.percentile(r_, 90))))
+    resid_q["M0"] = resid_q["M1"] = resid_q["M2"]
+    rb = np.log(trb["truth_value"].values / oof_b)
+    resid_q["Signal_B"] = (float(np.exp(np.percentile(rb, 10))), float(np.exp(np.percentile(rb, 90))))
+    resid_q["Fusion_AB"] = resid_q["M4"]
 
     fact_rows = []
-    q10_resid_mult = float(np.percentile( np.exp(ols_res["residuals"]), 10 ))
-    q90_resid_mult = float(np.percentile( np.exp(ols_res["residuals"]), 90 ))
 
-    for idx, r in df_all.iterrows():
-        appid = int(r["appid"])
-        cohort = r["data_cohort"]
-        g_key = game_key_map[appid]
-        gid = genre_id_map.get(r["genre"], 1)
-        rel_year = int(r["release_year"])
-        tot_rev = int(r["total_reviews"])
-        price = float(r["price_usd"])
-        true_y = int(r["true_sales_or_players"])
-        obs_k = float(r["k_ratio"])
+    def add_fact(row, method_id, code, est, lo, hi):
+        est = max(1, int(round(est)))
+        lo = max(1, int(round(min(lo, est))))
+        hi = max(est, int(round(hi)))
+        truth = int(row["truth_value"])
+        err = (est - truth) / truth
+        fact_rows.append((
+            int(row["sample_id"]), int(row["appid"]), game_key[int(row["appid"])], genre_id.get(row["genre"], 10),
+            int(row["release_year"]), method_id, code, row["cohort"], row["era_group"], int(row["total_reviews"]),
+            float(row["price_usd"]), truth, est, lo, hi, round(est * float(row["price_usd"]), 2),
+            round(est / row["total_reviews"], 3), round(float(row["k_ratio"]), 3), round(err, 5), round(abs(err), 5),
+            int(abs(err) <= 0.30), int(abs(err) <= 0.50)))
 
-        x_row = X_all[idx]
-        x_tree_row = X_all_tree[idx:idx+1]
+    for i, row in tr.iterrows():
+        n = row["total_reviews"]
+        e0, e1 = n * 30.0, n * m1_k(row["release_year"])
+        add_fact(row, 1, "M0", e0, e0 * resid_q["M0"][0], e0 * resid_q["M0"][1])
+        add_fact(row, 2, "M1", e1, e1 * resid_q["M1"][0], e1 * resid_q["M1"][1])
+        e2 = n * math.exp(oof["M2"][i])
+        add_fact(row, 3, "M2", e2, e2 * resid_q["M2"][0], e2 * resid_q["M2"][1])
+        add_fact(row, 4, "M3", n * math.exp(oof["M3"][i]), n * math.exp(oof["M3_lo"][i]), n * math.exp(oof["M3_hi"][i]))
+        e4 = n * math.exp(oof["M4"][i])
+        add_fact(row, 5, "M4", e4, e4 * resid_q["M4"][0], e4 * resid_q["M4"][1])
+        if row["sample_id"] in oof_b_map:
+            eb = oof_b_map[row["sample_id"]]
+            add_fact(row, 6, "Signal_B", eb, eb * resid_q["Signal_B"][0], eb * resid_q["Signal_B"][1])
+    for i, row in te.iterrows():
+        n = row["total_reviews"]
+        e0, e1 = n * 30.0, n * m1_k(row["release_year"])
+        add_fact(row, 1, "M0", e0, e0 * resid_q["M0"][0], e0 * resid_q["M0"][1])
+        add_fact(row, 2, "M1", e1, e1 * resid_q["M1"][0], e1 * resid_q["M1"][1])
+        add_fact(row, 3, "M2", est_te["M2"][i], est_te["M2"][i] * resid_q["M2"][0], est_te["M2"][i] * resid_q["M2"][1])
+        add_fact(row, 4, "M3", est_te["M3"][i], est_te["M3_lo"][i], est_te["M3_hi"][i])
+        add_fact(row, 5, "M4", est_te["M4"][i], est_te["M4"][i] * resid_q["M4"][0], est_te["M4"][i] * resid_q["M4"][1])
+        if has_b_te[i]:
+            eb = y_b_te[i]
+            add_fact(row, 6, "Signal_B", eb, eb * resid_q["Signal_B"][0], eb * resid_q["Signal_B"][1])
+        ef = est_te["Fusion_AB"][i]
+        add_fact(row, 7, "Fusion_AB", ef, ef * resid_q["Fusion_AB"][0], ef * resid_q["Fusion_AB"][1])
 
-        # (1) M0: 固定倍数 30
-        k_m0 = 30.0
-        y_m0 = tot_rev * k_m0
-
-        # (2) M1: 按年份分段文献值
-        if rel_year <= 2013:
-            k_m1 = 68.0
-        elif 2014 <= rel_year <= 2016:
-            k_m1 = 56.0
-        elif rel_year in (2017, 2018):
-            k_m1 = 46.0
-        elif rel_year == 2019:
-            k_m1 = 40.0
-        else:
-            k_m1 = 35.0
-        y_m1 = tot_rev * k_m1
-
-        # (3) M2: 对数线性回归（含年代校准与跨时代拆分公式）
-        k_old_m2 = math.exp(float(x_row @ beta_m2))
-        k_new_m2 = math.exp(float(x_row @ beta_m2) + delta_m2)
-        if cohort == "train_2018":
-            # 2018 样本使用 5 折交叉验证袋外预测，避免自训练虚高
-            pos_in_2018 = int(np.where(df_2018["appid"].values == appid)[0][0])
-            k_m2 = math.exp(float(cv_preds_log_k["M2"][pos_in_2018]))
-            y_m2 = tot_rev * k_m2
-        elif cohort == "modern_2020":
-            k_m2 = k_new_m2
-            y_m2 = tot_rev * k_m2
-        else:
-            # 跨时代游戏：玩家数_A = k_旧 * 提示上线前评测数 + k_新 * 提示上线后评测数
-            y_m2 = r["reviews_pre_2019"] * k_old_m2 + r["reviews_post_2019"] * k_new_m2
-            k_m2 = y_m2 / tot_rev
-
-        # (4) M3: 分位数回归（中位数预测 + [P10, P90] 预测区间）
-        era_shift = 0.0 if cohort == "train_2018" else delta_m2
-        if cohort == "cross_era":
-            k_m3 = (r["reviews_pre_2019"] * math.exp(float(x_row @ beta_q50)) +
-                    r["reviews_post_2019"] * math.exp(float(x_row @ beta_q50) + delta_m2)) / tot_rev
-        else:
-            k_m3 = math.exp(float(x_row @ beta_q50) + era_shift)
-        y_m3 = tot_rev * k_m3
-        y_m3_low = tot_rev * math.exp(float(x_row @ beta_q10) + era_shift)
-        y_m3_high = tot_rev * math.exp(float(x_row @ beta_q90) + era_shift)
-
-        # (5) M4: 随机森林 + 梯度提升树集成（含年代校准与跨时代拆分公式）
-        k_old_m4 = math.exp(float(0.45 * rf_model.predict(x_tree_row)[0] + 0.55 * gbdt_model.predict(x_tree_row)[0]))
-        k_new_m4 = k_old_m4 * math.exp(delta_m4)
-        if cohort == "train_2018":
-            pos_in_2018 = int(np.where(df_2018["appid"].values == appid)[0][0])
-            k_m4 = math.exp(float(cv_preds_log_k["M4"][pos_in_2018]))
-            y_m4 = tot_rev * k_m4
-        elif cohort == "modern_2020":
-            k_m4 = k_new_m4
-            y_m4 = tot_rev * k_m4
-        else:
-            y_m4 = r["reviews_pre_2019"] * k_old_m4 + r["reviews_post_2019"] * k_new_m4
-            k_m4 = y_m4 / tot_rev
-
-        # (6) Signal_B: 在线人数总游玩时长 ÷ 人均游玩时长
-        if cohort == "train_2018":
-            est_avg_hrs = max(r["avg_playtime_at_review_hrs"] / reviewer_bias_alpha, 0.5)
-        else:
-            est_avg_hrs = max(r["steamspy_avg_forever_min"] / 60.0, 0.5)
-        y_sigb = r["steamcharts_total_player_hours"] / est_avg_hrs
-        k_sigb = y_sigb / tot_rev
-
-        # (7) Fusion_AB: 信号 A (M4) + 信号 B 对数加权融合
-        y_fusion = math.exp(w_fusion[0] + w_fusion[1] * math.log(max(y_m4, 1.0)) + w_fusion[2] * math.log(max(y_sigb, 1.0)))
-        k_fusion = y_fusion / tot_rev
-
-        method_outputs = [
-            (1, "M0", y_m0, y_m0 * 0.65, y_m0 * 1.50, k_m0),
-            (2, "M1", y_m1, y_m1 * 0.70, y_m1 * 1.40, k_m1),
-            (3, "M2", y_m2, y_m2 * q10_resid_mult, y_m2 * q90_resid_mult, k_m2),
-            (4, "M3", y_m3, y_m3_low, y_m3_high, k_m3),
-            (5, "M4", y_m4, y_m4 * 0.80, y_m4 * 1.25, k_m4),
-            (6, "Signal_B", y_sigb, y_sigb * 0.78, y_sigb * 1.28, k_sigb),
-            (7, "Fusion_AB", y_fusion, y_fusion * 0.84, y_fusion * 1.19, k_fusion),
-        ]
-
-        for m_id, m_code, y_est, y_low, y_high, imp_k in method_outputs:
-            y_est_int = max(1, int(round(y_est)))
-            y_low_int = max(1, int(round(min(y_low, y_est_int * 0.92))))
-            y_high_int = max(y_est_int, int(round(max(y_high, y_est_int * 1.08))))
-            # 估算净销售额（考虑买断制平均折扣系数 0.78）
-            est_rev = round(y_est_int * price * 0.78, 2)
-            pct_err = (y_est_int - true_y) / float(true_y)
-            abs_err = abs(pct_err)
-            w30 = 1 if abs_err <= 0.30 else 0
-            w50 = 1 if abs_err <= 0.50 else 0
-            fact_rows.append((
-                appid, g_key, gid, rel_year, m_id, m_code, cohort, tot_rev, price,
-                true_y, y_est_int, y_low_int, y_high_int, est_rev,
-                round(imp_k, 2), round(obs_k, 2), round(pct_err, 4), round(abs_err, 4), w30, w50
-            ))
-
-    t0 = time.time()
     with conn:
         conn.execute("DELETE FROM fact_sales_estimation;")
         conn.executemany(
-            """
-            INSERT INTO fact_sales_estimation
-            (appid, game_key, genre_id, date_key, method_id, method_code, data_cohort, total_reviews, price_usd,
-             true_sales_or_players, estimated_sales, estimated_low_bound, estimated_high_bound, estimated_revenue_usd,
-             implied_k, observed_k, pct_error, abs_pct_error, within_30pct_flag, within_50pct_flag)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            fact_rows
-        )
+            """INSERT INTO fact_sales_estimation (sample_id, appid, game_key, genre_id, date_key, method_id, method_code,
+               cohort, era_group, total_reviews, price_usd, true_value, estimated_sales, estimated_low_bound,
+               estimated_high_bound, estimated_revenue_usd, implied_k, observed_k, pct_error, abs_pct_error,
+               within_30pct_flag, within_50pct_flag) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            fact_rows)
 
-    # 7. 计算各数据集与各方法的评估指标汇总，写回 ads_model_eval_summary（并并列放入 Gamalytic 商业基准）
-    df_fact = pd.read_sql_query("SELECT * FROM fact_sales_estimation", conn)
-    method_name_map = dict(conn.execute("SELECT method_code, method_name FROM dim_estimation_method").fetchall())
-
+    # ---------------- 评估汇总 ----------------
+    method_name = dict(conn.execute("SELECT method_code, method_name FROM dim_estimation_method").fetchall())
+    fact = pd.read_sql_query("SELECT * FROM fact_sales_estimation", conn)
     eval_rows = []
-    for cohort_code, cohort_label in [
-        ("train_2018", "2018_5Fold_CV (N=395)"),
-        ("modern_2020", "Modern_2020_Test (N=32)"),
-        ("cross_era", "Cross_Era_Test (N=8)"),
-    ]:
-        sub_c = df_fact[df_fact["data_cohort"] == cohort_code]
-        for m_code in ["M0", "M1", "M2", "M3", "M4", "Signal_B", "Fusion_AB"]:
-            sub_m = sub_c[sub_c["method_code"] == m_code]
-            m_stats = calc_metrics(
-                sub_m["true_sales_or_players"].values,
-                sub_m["estimated_sales"].values,
-                np.log10(sub_m["true_sales_or_players"].values),
-                np.log10(sub_m["estimated_sales"].values)
-            )
-            note_str = "本系统实测结果"
-            if cohort_code == "cross_era" and m_code in ("M2", "M4", "Fusion_AB"):
-                note_str = "采用跨时代新旧评测拆分公式: k_旧*N_旧 + k_新*N_新"
-            eval_rows.append((
-                cohort_label, m_code, method_name_map[m_code], len(sub_m),
-                m_stats["mape_pct"], m_stats["mdape_pct"], m_stats["r2_log"],
-                m_stats["hit_rate_10pct"], m_stats["hit_rate_30pct"], m_stats["hit_rate_50pct"], note_str
-            ))
 
-    # 加入 Gamalytic (2023) 官方公布的 120 款公开销量游戏测试基准用于直接对标
-    gamalytic_benchmarks = [
-        ("Gamalytic_Benchmark (N=120)", "G_Fixed", "Gamalytic基准: 评测数×固定倍数", 120, 36.26, 31.50, 0.8650, 12.82, 42.74, 70.94, "Gamalytic 2023 公开基准对照"),
-        ("Gamalytic_Benchmark (N=120)", "G_Adjusted", "Gamalytic基准: 评测数×修正倍数(年份/价格/好评率)", 120, 32.66, 29.40, 0.8920, 12.82, 50.43, 80.34, "Gamalytic 2023 公开基准对照"),
-        ("Gamalytic_Benchmark (N=120)", "G_CCU_Playtime", "Gamalytic基准: 在线人数+游玩时长", 120, 23.98, 21.00, 0.9310, 21.11, 64.44, 93.33, "Gamalytic 2023 公开基准对照"),
-        ("Gamalytic_Benchmark (N=120)", "G_TopSeller", "Gamalytic基准: 热销榜排名反推", 120, 28.26, 24.50, 0.9120, 21.05, 61.40, 85.96, "Gamalytic 2023 公开基准对照"),
-        ("Gamalytic_Benchmark (N=120)", "G_Fusion", "Gamalytic基准: 多信号加权融合", 120, 19.54, 16.80, 0.9610, 30.77, 76.92, 99.15, "Gamalytic 2023 公开基准对照"),
+    def add_eval(cohort_label, code, name, y, e, note):
+        if len(y) == 0:
+            return
+        m = metrics(y, e)
+        eval_rows.append((cohort_label, code, name, m["n"], round(m["mape"], 2), round(m["mdape"], 2),
+                          round(m["r2_log"], 4), round(m["hit10"], 2), round(m["hit30"], 2), round(m["hit50"], 2), note))
+
+    groups = [
+        ("2018 五折交叉验证", fact["cohort"] == "train_2018", "袋外预测；真值是泄露玩家数"),
+        ("真值集 全部", fact["cohort"] == "truth", "真值是公开销量；政策系数与融合权重为留一法"),
+        ("真值集 政策前公布", (fact["cohort"] == "truth") & (fact["era_group"] == "pre_policy"), ""),
+        ("真值集 跨时代", (fact["cohort"] == "truth") & (fact["era_group"] == "cross_era"), "政策前发售、政策后公布"),
+        ("真值集 政策后发售", (fact["cohort"] == "truth") & (fact["era_group"] == "post_policy"), ""),
     ]
-    eval_rows.extend(gamalytic_benchmarks)
+    for label, mask, note in groups:
+        sub = fact[mask]
+        for code in ["M0", "M1", "M2", "M3", "M4", "Signal_B", "Fusion_AB"]:
+            s = sub[sub["method_code"] == code]
+            extra = "（只含有 SteamCharts 完整覆盖的样本）" if code == "Signal_B" else ""
+            add_eval(label, code, method_name[code], s["true_value"].values, s["estimated_sales"].values, note + extra)
+
+    # 公平比较：只看"信号 B 可用"的那部分真值样本，A、B、融合三者同一批游戏
+    b_ids = set(fact[(fact["cohort"] == "truth") & (fact["method_code"] == "Signal_B")]["sample_id"])
+    sub = fact[(fact["cohort"] == "truth") & fact["sample_id"].isin(b_ids)]
+    for code in ["M0", "M2", "M4", "Signal_B", "Fusion_AB"]:
+        s = sub[sub["method_code"] == code]
+        add_eval("真值集 信号B可用子集", code, method_name[code], s["true_value"].values, s["estimated_sales"].values,
+                 "同一批游戏上比较 A / B / 融合")
+
+    # 直接迁移（只调政策系数 r）与近年校准的对比
+    for code, note in [("M2_no_calib", "直接迁移，不做政策校准 r=1"),
+                       ("M2_r_lit", "直接迁移，文献值 r=0.5，不用真值"),
+                       ("M2_r_scan", f"直接迁移，评测量跳升倒数 r={r_scan:.3f}，不用真值"),
+                       ("M2_r_loo", "直接迁移，r 用留一法拟合")]:
+        add_eval("真值集 迁移方式对比", code, "M2 " + note, y_true_te, transfer[code], note)
+    add_eval("真值集 迁移方式对比", "M2", "M2 近年校准（全部系数留一法重估）", y_true_te, est_te["M2"], "即主表中的 M2")
+
+    # Gamalytic 在同一批游戏上的估算（来自同一张表的 Estimate 列）
+    truth_ods = pd.read_sql_query("SELECT truth_id, appid, report_date, gamalytic_estimate FROM ods_recent_sales_truth", conn)
+    g = te.merge(truth_ods, left_on=["appid", "cutoff_date"], right_on=["appid", "report_date"], how="left")
+    g = g[g["gamalytic_estimate"].notna()]
+    add_eval("真值集 全部", "Gamalytic_same", "Gamalytic 自己的估算(同一批游戏)", g["truth_value"].values,
+             g["gamalytic_estimate"].values, "来自 Gamalytic 测试表的 Estimate 列，作同口径对照")
+    for code, name, hit in GAMALYTIC_PUBLISHED:
+        eval_rows.append(("Gamalytic 公布(约120款)", code, name, 120, None, None, None, None, hit, None,
+                          "原文只给了 ±30% 命中率"))
 
     with conn:
         conn.execute("DELETE FROM ads_model_eval_summary;")
         conn.executemany(
-            """
-            INSERT INTO ads_model_eval_summary
-            (eval_cohort, method_code, method_name, sample_size, mape_pct, mdape_pct, r2_log, hit_rate_10pct, hit_rate_30pct, hit_rate_50pct, note)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            eval_rows
-        )
+            """INSERT INTO ads_model_eval_summary (eval_cohort, method_code, method_name, sample_size, mape_pct, mdape_pct,
+               r2_log, hit_rate_10pct, hit_rate_30pct, hit_rate_50pct, note) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            eval_rows)
 
-    # 8. 写入特征重要性与回归系数表 ads_feature_importance
+    # ---------------- 特征重要性与回归系数 ----------------
     feat_rows = []
-    rf_imp = rf_model.feature_importances_ * 100.0
-    gb_imp = gbdt_model.feature_importances_ * 100.0
-
-    direction_notes = {
-        "intercept": "2018年基准对数倍数截距（对应基准 k ≈ 62）",
-        "log_price": "显著负相关：定价越高，买家决策越慎重、评论意愿越强，k 越低",
-        "positive_rate": "倒U形线性分量：配合二次项刻画70%好评率峰值",
-        "positive_rate_sq": "显著负相关（倒U形核心项）：好评率偏离72%越远（极高好评或差评宣泄），评论率越高，k 越低",
-        "log_reviews": "轻度负相关：超级爆款与极小众核心作评论更密集",
-        "release_year_c": "显著负相关：发售年份越近，Steam社区评论习惯越成熟，k 逐年走低",
-        "schinese_ratio": "轻度负相关：中文区玩家近年增长快且评论活跃度略高，但显著性弱于价格与好评率",
-        "log_playtime": "显著负相关：游玩时间越长越容易触发评论，每条评论对应的销量倍数 k 越低",
-    }
-
-    for i, (f_code, f_cn) in enumerate(feat_names):
-        rf_val = float(rf_imp[i - 1]) if i > 0 else 0.0
-        gb_val = float(gb_imp[i - 1]) if i > 0 else 0.0
-        desc = direction_notes.get(f_code, "游戏主类型受众固定效应（相对Action基准组）")
-        feat_rows.append((
-            f_code, f_cn,
-            round(float(ols_res["beta"][i]), 4),
-            round(float(ols_res["std_err"][i]), 4),
-            round(float(ols_res["t_stats"][i]), 4),
-            round(float(ols_res["p_vals"][i]), 6),
-            round(rf_val, 2),
-            round(gb_val, 2),
-            desc
-        ))
-
+    for j, (code, cn) in enumerate(feat_names):
+        rf_imp = float(tree.rf.feature_importances_[j - 1] * 100) if j > 0 else None
+        gb_imp = float(tree.gb.feature_importances_[j - 1] * 100) if j > 0 else None
+        feat_rows.append((code, cn, round(float(ols["beta"][j]), 5), round(float(ols["se"][j]), 5),
+                          round(float(ols["t"][j]), 3), float(ols["p"][j]),
+                          None if rf_imp is None else round(rf_imp, 2), None if gb_imp is None else round(gb_imp, 2)))
     with conn:
         conn.execute("DELETE FROM ads_feature_importance;")
         conn.executemany(
-            """
-            INSERT INTO ads_feature_importance
-            (feature_code, feature_cn_name, m2_ols_coef, m2_std_err, m2_t_stat, m2_p_value, m4_rf_importance_pct, m4_gbdt_importance_pct, direction_desc)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            feat_rows
-        )
+            """INSERT INTO ads_feature_importance (feature_code, feature_cn_name, m2_ols_coef, m2_std_err, m2_t_stat,
+               m2_p_value, m4_rf_importance_pct, m4_gbdt_importance_pct) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""", feat_rows)
 
-    # 记录模型训练与回写 ETL 日志
-    dur_ms = int(round((time.time() - t0) * 1000))
+    # ---------------- 政策校准与系数稳定性检验（设计文档 3.6 节） ----------------
+    # 用 2018 模型 + 留一法 r 估算真值样本后，看 ln(真实/估算) 是否还和某个特征相关：
+    # 不相关 -> 政策只改变了整体水平，2018 的系数可以沿用；相关 -> 该系数也变了
+    resid_te = np.log(y_true_te / transfer["M2_r_loo"])  # 检验的是"直接迁移"的残差
+    calib_rows = [
+        ("transfer_r_loo_full", r_full, "直接迁移时政策系数 r 的全样本拟合值"),
+        ("transfer_r_loo_min", float(r_used.min()), "留一法各次拟合 r 的最小值"),
+        ("transfer_r_loo_max", float(r_used.max()), "留一法各次拟合 r 的最大值"),
+        ("r_review_jump_inverse", r_scan, "40 款老游戏评测量跳升倍数的倒数"),
+        ("r_literature", 0.5, "Gamalytic: 2019 年后 k 减半"),
+        ("recal_gamma0", float(w_recal_full[0]), "M2 近年校准：截距（全样本拟合，仅供报告解读）"),
+        ("recal_delta_after_share", float(w_recal_full[1]), "M2 近年校准：政策后评测占比的系数，exp 后即 k 的倍数"),
+    ] + [(f"recal_gamma_{feat_names[j][0]}", float(w_recal_full[j + 1]), f"M2 近年校准：{feat_names[j][1]} 的系数修正")
+         for j in range(1, 10)] + [
+        ("signalB_a", float(ab[0]), "ln(人均小时) = a + b·ln(评测者时长) 中的 a"),
+        ("signalB_b", float(ab[1]), "同上的 b"),
+        ("fusion_w0", float(w_full[0]), "全样本融合权重（报告用）"),
+        ("fusion_wA", float(w_full[1]), ""),
+        ("fusion_wB", float(w_full[2]), ""),
+        ("m2_cv_r2_2018", float(1 - ((y_tr - oof["M2"]) ** 2).sum() / ((y_tr - y_tr.mean()) ** 2).sum()), "2018 五折 ln k 的 R²"),
+        ("m4_cv_r2_2018", float(1 - ((y_tr - oof["M4"]) ** 2).sum() / ((y_tr - y_tr.mean()) ** 2).sum()), ""),
+        ("m3_interval_coverage_2018", float(np.mean((y_tr >= oof["M3_lo"]) & (y_tr <= oof["M3_hi"]))), "名义 80%"),
+        ("m3_interval_coverage_truth", float(np.mean((y_true_te >= est_te["M3_lo"]) & (y_true_te <= est_te["M3_hi"]))), "名义 80%"),
+    ]
+    for j, (code, cn) in enumerate(feat_names[1:10], start=1):
+        x = X_te[:, j]
+        if np.std(x) > 0:
+            rho, pval = stats.spearmanr(x, resid_te)
+            calib_rows.append((f"resid_corr_{code}", float(rho), f"直接迁移残差与 {cn} 的 Spearman 相关，p={pval:.3f}"))
+    with conn:
+        conn.execute("DELETE FROM ads_policy_calibration;")
+        conn.executemany("INSERT INTO ads_policy_calibration (item, value, note) VALUES (?, ?, ?)", calib_rows)
+
+    log_msg = f"写入事实表 {len(fact_rows)} 行，评估 {len(eval_rows)} 行"
     with conn:
         conn.execute(
-            """
-            INSERT INTO etl_job_log
-            (job_name, batch_date, start_time, end_time, rows_extracted, rows_loaded, rows_rejected, status, duration_ms, message)
-            VALUES ('MODEL_INFERENCE_AND_ADS_LOAD', '2026-10-12', datetime('now'), datetime('now'), ?, ?, 0, 'SUCCESS', ?, '完成M0~M4+信号B+双信号融合共7种模型写入星型模型事实表')
-            """,
-            (len(df_all), len(fact_rows), dur_ms)
-        )
+            """INSERT INTO etl_job_log (job_name, start_time, end_time, rows_extracted, rows_loaded, rows_rejected,
+               status, duration_ms, message) VALUES ('MODEL_TRAIN_AND_LOAD', ?, ?, ?, ?, 0, 'SUCCESS', ?, ?)""",
+            (time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(t_start)), time.strftime("%Y-%m-%d %H:%M:%S"),
+             len(df), len(fact_rows), int((time.time() - t_start) * 1000), log_msg))
 
-    # 9. 执行建索引前后的 EXPLAIN QUERY PLAN 与耗时对比，生成实测对比报告
-    test_sql = """
-    SELECT
-        dm.method_name,
-        dge.genre_cn_name,
-        COUNT(*) AS game_cnt,
-        ROUND(AVG(f.abs_pct_error) * 100, 2) AS mean_ape_pct,
-        ROUND(SUM(f.within_30pct_flag) * 100.0 / COUNT(*), 2) AS hit_rate_30pct
-    FROM fact_sales_estimation f
-    JOIN dim_game dg ON f.game_key = dg.game_key
-    JOIN dim_genre dge ON f.genre_id = dge.genre_id
-    JOIN dim_estimation_method dm ON f.method_id = dm.method_id
-    WHERE f.data_cohort = 'modern_2020' AND f.method_code IN ('M0', 'M2', 'M4', 'Fusion_AB')
-    GROUP BY dm.method_name, dge.genre_cn_name
-    """
-    # 先删除索引（若已存在），测量无索引执行计划与 200 次查询耗时
-    with conn:
-        for idx_name in ["idx_fact_cohort_method", "idx_fact_game_key", "idx_dwd_cohort_genre_year", "idx_scd2_appid_dates", "idx_snap_appid_date"]:
-            conn.execute(f"DROP INDEX IF EXISTS {idx_name};")
-
-    plan_before = conn.execute("EXPLAIN QUERY PLAN " + test_sql).fetchall()
-    t_no_idx_0 = time.perf_counter()
-    for _ in range(200):
-        conn.execute(test_sql).fetchall()
-    ms_no_idx = (time.perf_counter() - t_no_idx_0) * 1000.0
-
-    # 创建复合索引
-    with conn:
-        conn.execute("CREATE INDEX idx_fact_cohort_method ON fact_sales_estimation(data_cohort, method_code, genre_id);")
-        conn.execute("CREATE INDEX idx_fact_game_key ON fact_sales_estimation(game_key);")
-        conn.execute("CREATE INDEX idx_dwd_cohort_genre_year ON dwd_steam_game_aligned(data_cohort, genre, release_year);")
-        conn.execute("CREATE INDEX idx_scd2_appid_dates ON dim_price_scd2(appid, effective_start, effective_end, is_current);")
-        conn.execute("CREATE INDEX idx_snap_appid_date ON fact_daily_snapshot(appid, snapshot_date);")
-
-    plan_after = conn.execute("EXPLAIN QUERY PLAN " + test_sql).fetchall()
-    t_idx_0 = time.perf_counter()
-    for _ in range(200):
-        conn.execute(test_sql).fetchall()
-    ms_with_idx = (time.perf_counter() - t_idx_0) * 1000.0
-
-    explain_report = [
-        "=== 星型模型多表关联查询索引优化与 EXPLAIN 对比实验 ===",
-        f"1. 建索引前执行计划 (EXPLAIN QUERY PLAN): {plan_before}",
-        f"   - 200次聚合查询总耗时: {ms_no_idx:.2f} ms (事实表执行全表扫描 SCAN f)",
-        f"2. 建索引后执行计划 (EXPLAIN QUERY PLAN): {plan_after}",
-        f"   - 200次聚合查询总耗时: {ms_with_idx:.2f} ms (命中复合索引 SEARCH f USING INDEX idx_fact_cohort_method)",
-        f"3. 性能提升倍数: {ms_no_idx / max(ms_with_idx, 0.01):.2f}x"
-    ]
-    explain_text = "\n".join(explain_report)
-    (BASE_DIR / "data/cleaned/explain_comparison_report.txt").write_text(explain_text, encoding="utf-8")
-    print(explain_text)
-
-    # 10. 导出所有 FineBI 视图与结果表为 UTF-8 CSV，供 FineBI 本地直接导入或核对
-    views_to_export = [
-        "vw_sql_m0_m1_estimation",
-        "vw_finebi_k_median_by_year",
-        "vw_finebi_k_median_by_genre_price",
-        "vw_finebi_overview_dist",
-        "vw_finebi_star_sales_switch",
-        "vw_finebi_price_scd2_timeline",
-        "ads_model_eval_summary",
-        "ads_feature_importance",
-        "dim_price_scd2",
-        "etl_job_log",
-        "etl_checkpoint",
-        "etl_clean_error_log",
-    ]
-    for v_name in views_to_export:
-        df_v = pd.read_sql_query(f"SELECT * FROM {v_name}", conn)
-        df_v.to_csv(BASE_DIR / "data/cleaned" / f"{v_name}.csv", index=False, encoding="utf-8-sig")
-
+    explain_index_comparison(conn)
+    export_views(conn)
     conn.close()
-    sync_db()
 
-    # 打印核心模型评估对比表
-    df_eval = pd.read_csv(BASE_DIR / "data/cleaned/ads_model_eval_summary.csv")
-    print("\n=== 模型准确率综合对比表 (ads_model_eval_summary) ===")
-    print(df_eval[["eval_cohort", "method_code", "mape_pct", "mdape_pct", "r2_log", "hit_rate_30pct", "hit_rate_50pct"]].to_string(index=False))
+    ev = pd.DataFrame(eval_rows, columns=["cohort", "method", "name", "n", "mape", "mdape", "r2", "hit10", "hit30", "hit50", "note"])
+    print(ev[["cohort", "method", "n", "mape", "mdape", "r2", "hit30", "hit50"]].to_string(index=False))
+
+
+# ==============================================================================
+# 七、索引与 EXPLAIN 对比；视图导出
+# ==============================================================================
+EXPLAIN_SQL = """
+SELECT dm.method_name, dge.genre_cn_name, COUNT(*) AS game_cnt,
+       ROUND(AVG(f.abs_pct_error) * 100, 2) AS mean_ape_pct,
+       ROUND(SUM(f.within_30pct_flag) * 100.0 / COUNT(*), 2) AS hit_rate_30pct
+FROM fact_sales_estimation f
+JOIN dim_game dg ON f.game_key = dg.game_key
+JOIN dim_genre dge ON f.genre_id = dge.genre_id
+JOIN dim_estimation_method dm ON f.method_id = dm.method_id
+WHERE f.cohort = 'truth' AND f.method_code IN ('M0', 'M2', 'M4', 'Fusion_AB')
+GROUP BY dm.method_name, dge.genre_cn_name
+"""
+INDEXES = [
+    ("idx_fact_cohort_method", "fact_sales_estimation(cohort, method_code, genre_id)"),
+    ("idx_fact_game_key", "fact_sales_estimation(game_key)"),
+    ("idx_dwd_cohort_year", "dwd_game_sample(cohort, release_year)"),
+    ("idx_scd2_appid_dates", "dim_price_scd2(appid, effective_start, effective_end)"),
+    ("idx_snapshot_appid_time", "fact_snapshot(appid, fetched_at)"),
+]
+
+
+def explain_index_comparison(conn, repeat=300):
+    with conn:
+        for name, _ in INDEXES:
+            conn.execute(f"DROP INDEX IF EXISTS {name};")
+    plan_before = conn.execute("EXPLAIN QUERY PLAN " + EXPLAIN_SQL).fetchall()
+    t0 = time.perf_counter()
+    for _ in range(repeat):
+        conn.execute(EXPLAIN_SQL).fetchall()
+    ms_before = (time.perf_counter() - t0) * 1000
+    with conn:
+        for name, target in INDEXES:
+            conn.execute(f"CREATE INDEX {name} ON {target};")
+    plan_after = conn.execute("EXPLAIN QUERY PLAN " + EXPLAIN_SQL).fetchall()
+    t0 = time.perf_counter()
+    for _ in range(repeat):
+        conn.execute(EXPLAIN_SQL).fetchall()
+    ms_after = (time.perf_counter() - t0) * 1000
+    n_fact = conn.execute("SELECT COUNT(*) FROM fact_sales_estimation").fetchone()[0]
+    lines = [
+        "=== 索引前后 EXPLAIN QUERY PLAN 与耗时对比（SQLite，本机实测，每次运行数字会略有不同）===",
+        f"事实表行数: {n_fact}；同一条四表关联聚合查询重复执行 {repeat} 次",
+        "建索引前执行计划:",
+    ] + [f"    {r[-1]}" for r in plan_before] + [
+        f"    耗时 {ms_before:.1f} ms",
+        "建索引后执行计划:",
+    ] + [f"    {r[-1]}" for r in plan_after] + [
+        f"    耗时 {ms_after:.1f} ms",
+        f"提速倍数: {ms_before / max(ms_after, 0.01):.2f}x",
+    ]
+    text = "\n".join(lines)
+    (CLEANED_DIR / "explain_comparison_report.txt").write_text(text, encoding="utf-8")
+    print(text, flush=True)
+
+
+def export_views(conn):
+    CLEANED_DIR.mkdir(parents=True, exist_ok=True)
+    for name in ["vw_sql_m0_m1_estimation", "vw_finebi_k_median_by_year", "vw_finebi_k_median_by_factor",
+                 "vw_finebi_overview_dist", "vw_finebi_star_sales_switch", "vw_finebi_price_scd2_timeline",
+                 "vw_finebi_review_policy_index", "vw_finebi_method_accuracy", "ads_feature_importance",
+                 "ads_policy_calibration", "etl_job_log", "etl_checkpoint", "etl_clean_error_log", "dim_price_scd2"]:
+        pd.read_sql_query(f"SELECT * FROM {name}", conn).to_csv(CLEANED_DIR / f"{name}.csv", index=False, encoding="utf-8-sig")
 
 
 if __name__ == "__main__":

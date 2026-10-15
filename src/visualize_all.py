@@ -1,456 +1,260 @@
 # -*- coding: utf-8 -*-
 """
-Steam 游戏销量估算与智能分析系统 - 全套统计图表绘制脚本 (src/visualize_all.py)
-用途：
-1. 生成报告与答辩所需的全套高清中文统计图 (fig03 ~ fig10)；
-2. 专门解决 FineBI 不擅长的统计拟合曲线（如好评率倒U形二次拟合、M3预测区间误差棒、多模型残差核密度、特征重要性与Gamalytic对标图）。
+报告用统计图 (src/visualize_all.py)：FineBI 不擅长的统计图（拟合线、误差带、对角线散点等）用 Python 画。
+全部从 data/steam_sales_dw.db 读数，图上的每个数字都来自数据库，不手写。
+
+fig03 数据概览            fig04 评测提示政策：月度评测指数 + 各发售年份 k
+fig05 影响 k 的因素        fig06 真值集上 估算 vs 真实
+fig07 回归系数与树模型重要性  fig08 ±30% 命中率对标 Gamalytic
+fig09 真实价格拉链（档案馆）  fig10 系统架构
 """
-import math
+import re
 import sqlite3
 import pathlib
+
 import numpy as np
 import pandas as pd
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 
-plt.rcParams["font.sans-serif"] = ["Noto Sans CJK JP", "Droid Sans Fallback", "DejaVu Sans"]
-plt.rcParams["axes.unicode_minus"] = False
+from plot_style import plt, COLORS, INK, style_axes, save
 
 BASE_DIR = pathlib.Path(__file__).resolve().parent.parent
 DB_PATH = BASE_DIR / "data" / "steam_sales_dw.db"
-FIG_DIR = BASE_DIR / "figures"
-FIG_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def generate_all_figures():
-    conn = sqlite3.connect(str(DB_PATH))
-    df_dwd = pd.read_sql_query("SELECT * FROM dwd_steam_game_aligned", conn)
-    df_2018 = df_dwd[df_dwd["data_cohort"] == "train_2018"].copy()
-    df_2020 = df_dwd[df_dwd["data_cohort"] == "modern_2020"].copy()
-    df_year_view = pd.read_sql_query("SELECT * FROM vw_finebi_k_median_by_year", conn)
-    df_fact = pd.read_sql_query("SELECT * FROM vw_finebi_star_sales_switch", conn)
-    df_eval = pd.read_sql_query("SELECT * FROM ads_model_eval_summary", conn)
-    df_feat = pd.read_sql_query("SELECT * FROM ads_feature_importance", conn)
-    df_timeline = pd.read_sql_query("SELECT * FROM vw_finebi_price_scd2_timeline", conn)
-    conn.close()
+def q(conn, sql):
+    return pd.read_sql_query(sql, conn)
 
-    # ==========================================================================
-    # 图3：数据概览三联图 (评测数对数分布、发售年份分布、美区价格分布)
-    # ==========================================================================
-    fig, axes = plt.subplots(1, 3, figsize=(15.5, 4.8), dpi=180)
-    ax1, ax2, ax3 = axes
 
-    ax1.hist(np.log10(df_dwd["total_reviews"]), bins=22, color="#2B5C8F", edgecolor="white", alpha=0.88)
-    ax1.axvline(np.median(np.log10(df_dwd["total_reviews"])), color="#D9534F", linestyle="--", linewidth=2,
-                label=f"中位数 = 10^{np.median(np.log10(df_dwd['total_reviews'])):.2f} 条")
-    ax1.set_title("(a) 样本评测总数对数分布 log10(Reviews)", fontsize=11.5, fontweight="bold")
-    ax1.set_xlabel("log10(累计评测总数)", fontsize=10)
-    ax1.set_ylabel("游戏数量（款）", fontsize=10)
-    ax1.legend(frameon=True, fontsize=9)
-    ax1.grid(axis="y", linestyle="--", alpha=0.35)
+def fig03_overview(conn):
+    d = q(conn, "SELECT cohort, model_eligible, total_reviews, release_year, price_usd FROM dwd_game_sample")
+    tr = d[(d["cohort"] == "train_2018") & (d["model_eligible"] == 1)]
+    te = d[d["cohort"] == "truth"]
+    fig, axes = plt.subplots(1, 3, figsize=(14, 4.2))
+    ax = axes[0]
+    bins = np.linspace(0, 6.5, 33)
+    ax.hist(np.log10(tr["total_reviews"]), bins=bins, color=COLORS[0], alpha=0.85, edgecolor="white", label=f"2018 训练集 ({len(tr)})")
+    ax.hist(np.log10(te["total_reviews"]), bins=bins, color=COLORS[1], alpha=0.85, edgecolor="white", label=f"真值集 ({len(te)})")
+    ax.legend(frameon=False, fontsize=9)
+    style_axes(ax, "(a) 评测数（对数）", "log₁₀ 截止日评测数", "样本数")
+    ax = axes[1]
+    years = np.arange(min(d["release_year"].min(), 2004), 2024)
+    c1 = tr["release_year"].value_counts().reindex(years, fill_value=0)
+    c2 = te["release_year"].value_counts().reindex(years, fill_value=0)
+    ax.bar(years - 0.2, c1.values, width=0.4, color=COLORS[0], label="2018 训练集")
+    ax.bar(years + 0.2, c2.values, width=0.4, color=COLORS[1], label="真值集")
+    ax.legend(frameon=False, fontsize=9)
+    style_axes(ax, "(b) 发售年份", "发售年份", "样本数")
+    ax = axes[2]
+    pb = np.arange(0, 65, 2.5)
+    ax.hist(tr["price_usd"].clip(upper=62), bins=pb, color=COLORS[0], alpha=0.85, edgecolor="white", label="2018 训练集")
+    ax.hist(te["price_usd"].clip(upper=62), bins=pb, color=COLORS[1], alpha=0.85, edgecolor="white", label="真值集")
+    ax.legend(frameon=False, fontsize=9)
+    style_axes(ax, "(c) 美区标价（>$60 归入最右一档）", "美元", "样本数")
+    save(fig, "fig03_data_overview_3panels.png")
 
-    yr_counts = df_dwd.groupby("release_year").size()
-    colors_yr = ["#2B5C8F" if y <= 2018 else ("#F0AD4E" if y == 2019 else "#D9534F") for y in yr_counts.index]
-    ax2.bar(yr_counts.index, yr_counts.values, color=colors_yr, edgecolor="white", width=0.78)
-    ax2.set_title("(b) 样本游戏发售年份分布 (蓝色<=2018, 红色>=2020)", fontsize=11.5, fontweight="bold")
-    ax2.set_xlabel("发售年份", fontsize=10)
-    ax2.set_ylabel("游戏数量（款）", fontsize=10)
-    ax2.grid(axis="y", linestyle="--", alpha=0.35)
 
-    tier_counts = df_dwd.groupby("price_tier").size().reindex([
-        "1_低价独立(<$10)", "2_中低定价($10-$20)", "3_中高等级($20-$40)", "4_全价大作(>=$40)"
-    ])
-    bars = ax3.bar(range(len(tier_counts)), tier_counts.values, color=["#4E79A7", "#59A14F", "#F28E2B", "#E15759"], width=0.62)
-    ax3.set_xticks(range(len(tier_counts)))
-    ax3.set_xticklabels(["低价独立\n(<$10)", "中低定价\n($10-$20)", "中高等级\n($20-$40)", "全价大作\n(>=$40)"], fontsize=9.5)
-    for b in bars:
-        ax3.text(b.get_x() + b.get_width()/2, b.get_height() + 3, f"{int(b.get_height())}款", ha="center", fontsize=9.5, fontweight="bold")
-    ax3.set_ylim(0, max(tier_counts.values) * 1.18)
-    ax3.set_title("(c) 买断制游戏美区定价分档分布", fontsize=11.5, fontweight="bold")
-    ax3.set_ylabel("游戏数量（款）", fontsize=10)
-    ax3.grid(axis="y", linestyle="--", alpha=0.35)
+def fig04_policy(conn):
+    m = q(conn, "SELECT * FROM ads_review_monthly_index ORDER BY month")
+    yk = q(conn, "SELECT * FROM vw_finebi_k_median_by_year ORDER BY release_year")
+    te = q(conn, "SELECT release_year, k_ratio, era_group FROM dwd_game_sample WHERE cohort = 'truth'")
+    fig, axes = plt.subplots(1, 2, figsize=(14, 4.6))
+    ax = axes[0]
+    x = np.arange(len(m))
+    ax.fill_between(x, m["q25"], m["q75"], color=COLORS[0], alpha=0.18, lw=0, label="四分位范围")
+    ax.plot(x, m["median_index"], color=COLORS[0], lw=2, marker="o", ms=4, label="40 款老游戏的中位数")
+    pm = int(np.where(m["is_policy_month"] == 1)[0][0])
+    ax.axvline(pm, color=INK["primary"], lw=1.2, ls="--")
+    ax.text(pm + 0.3, ax.get_ylim()[1] * 0.92, f"{m['month'][pm]}\n持续跳升起点", fontsize=9, color=INK["primary"], va="top")
+    ax.set_xticks(x[::3])
+    ax.set_xticklabels(m["month"][::3], rotation=45, ha="right")
+    ax.legend(frameon=False, fontsize=9, loc="upper left")
+    style_axes(ax, "(a) 老游戏每月新增评测 ÷ 自身 2018-07~2019-06 月中位数", None, "评测指数（基线 = 1）")
+    ax = axes[1]
+    tr = yk[(yk["cohort"] == "train_2018") & (yk["game_count"] >= 10)]
+    ax.plot(tr["release_year"], tr["median_k"], color=COLORS[0], lw=2, marker="o", ms=5, label="2018 训练集（真值=玩家数）")
+    tb = te.copy()
+    tb["bucket"] = np.where(tb["release_year"] < 2019, "2019 年以前", np.where(tb["release_year"] < 2020, "2019", tb["release_year"].astype(str)))
+    grp = te.groupby("release_year")["k_ratio"].agg(["median", "count"]).reset_index()
+    grp = grp[grp["count"] >= 3]
+    ax.plot(grp["release_year"], grp["median"], color=COLORS[1], lw=2, marker="s", ms=5, label="真值集（真值=销量，≥3 款的年份）")
+    ax.set_yscale("log")
+    ax.legend(frameon=False, fontsize=9)
+    style_axes(ax, "(b) 各发售年份 k 的中位数（对数坐标）", "发售年份", "k 中位数")
+    save(fig, "fig04_k_by_year_2019_cliff.png")
 
-    plt.suptitle("图3：明细层买断制 Steam 游戏多维特征概览 (N = 435)", fontsize=13.5, fontweight="bold", y=1.02)
-    plt.tight_layout()
-    plt.savefig(FIG_DIR / "fig03_data_overview_3panels.png", bbox_inches="tight")
-    plt.close()
 
-    # ==========================================================================
-    # 图4：实测 k 按发售年份折线图（直观展现 2019 年评测提示政策上线引发的断崖下跌）
-    # ==========================================================================
-    fig, ax = plt.subplots(figsize=(10.5, 5.6), dpi=180)
-    df_yv = df_year_view[df_year_view["release_year"] >= 2008].copy()
+def fig05_factors(conn):
+    f = q(conn, "SELECT * FROM vw_finebi_k_median_by_factor")
+    d = q(conn, "SELECT steam_purchase_ratio, k_ratio FROM dwd_game_sample WHERE cohort='train_2018' AND model_eligible=1")
+    fig, axes = plt.subplots(2, 2, figsize=(13, 8.4))
 
-    ax.plot(df_yv["release_year"], df_yv["median_k"], marker="o", linewidth=2.6, markersize=7, color="#1B365D", label="SQL窗口函数实测 k 中位数 (median_k)")
-    ax.plot(df_yv["release_year"], df_yv["mean_k"], marker="s", linestyle="--", linewidth=2.0, markersize=6, color="#4E79A7", label="实测 k 算术均值 (mean_k)")
-    ax.plot(df_yv["release_year"], df_yv["literature_k_multiple"], marker="^", linestyle=":", linewidth=2.2, markersize=6.5, color="#E15759", label="M1 文献经验系数分段线")
+    def bars(ax, factor, title, horizontal=False):
+        s = f[f["factor"] == factor].sort_values("factor_value")
+        labels = [f"{v}\n(n={n})" if not horizontal else f"{v} (n={n})" for v, n in zip(s["factor_value"], s["game_count"])]
+        if horizontal:
+            s = s.sort_values("median_k")
+            labels = [f"{v} (n={n})" for v, n in zip(s["factor_value"], s["game_count"])]
+            ax.barh(labels, s["median_k"], color=COLORS[0], height=0.6)
+            for i, v in enumerate(s["median_k"]):
+                ax.text(v, i, f" {v:.0f}", va="center", fontsize=9, color=INK["secondary"])
+            style_axes(ax, title, "k 中位数", None)
+        else:
+            ax.bar(labels, s["median_k"], color=COLORS[0], width=0.6)
+            for i, v in enumerate(s["median_k"]):
+                ax.text(i, v, f"{v:.0f}", ha="center", va="bottom", fontsize=9, color=INK["secondary"])
+            style_axes(ax, title, None, "k 中位数")
 
-    # 绘制 2019 年政策分界线与阴影
-    ax.axvline(2019.3, color="#D9534F", linestyle="-.", linewidth=2.2)
-    ax.axvspan(2019.3, 2024.3, color="#FADBD8", alpha=0.32, label="2019年10月后：Steam上线“游玩后弹窗提示写评测”")
-    ax.annotate(
-        "2019年政策断崖：\nSteam客户端主动弹窗邀请评测\n导致每条评测对应的销量 k 接近减半\n(从 45~65 骤降至 24~35)",
-        xy=(2019.3, 36),
-        xytext=(2011.5, 21),
-        arrowprops=dict(arrowstyle="->", color="#C0392B", lw=1.8),
-        fontsize=9.5,
-        fontweight="bold",
-        bbox=dict(boxstyle="round,pad=0.4", facecolor="#FFF8E7", edgecolor="#C0392B")
-    )
+    bars(axes[0, 0], "好评率档", "(a) 好评率档")
+    bars(axes[0, 1], "价格档", "(b) 价格档")
+    ax = axes[1, 0]
+    d["bin"] = pd.qcut(d["steam_purchase_ratio"], 8, duplicates="drop")
+    g = d.groupby("bin", observed=True).agg(x=("steam_purchase_ratio", "median"), k=("k_ratio", "median")).reset_index()
+    ax.scatter(d["steam_purchase_ratio"], d["k_ratio"], s=8, color=COLORS[0], alpha=0.25, lw=0)
+    ax.plot(g["x"], g["k"], color=COLORS[1], lw=2, marker="o", ms=6, label="分 8 组的中位数")
+    ax.set_yscale("log")
+    ax.legend(frameon=False, fontsize=9)
+    style_axes(ax, "(c) Steam 内购买评测占比（越低 = 激活码/赠送玩家越多）", "Steam 内购买评测占比", "k（对数）")
+    bars(axes[1, 1], "主类型", "(d) 主类型", horizontal=True)
+    fig.suptitle("2018 训练集：k 与各因素（分组中位数由 SQL 窗口函数视图算出）", fontsize=12, color=INK["primary"])
+    save(fig, "fig05_k_factors_4panels.png")
 
-    for _, r in df_yv.iterrows():
-        if r["release_year"] in (2010, 2013, 2016, 2018, 2020, 2022, 2024):
-            ax.text(r["release_year"], r["median_k"] + 2.2, f"{r['median_k']:.1f}", ha="center", fontsize=8.8, fontweight="bold", color="#1B365D")
 
-    ax.set_title("图4：Steam 买断制游戏实测 Boxleiter 倍数 k 随发售年份演变趋势与 2019 政策断崖", fontsize=12.5, fontweight="bold")
-    ax.set_xlabel("游戏发售年份 (Release Year)", fontsize=11)
-    ax.set_ylabel("每条 Steam 评测背后的真实玩家/销量倍数 k", fontsize=11)
-    ax.set_xticks(df_yv["release_year"])
-    ax.set_ylim(15, 88)
-    ax.legend(loc="upper right", frameon=True, fontsize=9.5)
-    ax.grid(True, linestyle="--", alpha=0.35)
-    plt.tight_layout()
-    plt.savefig(FIG_DIR / "fig04_k_by_year_2019_cliff.png", bbox_inches="tight")
-    plt.close()
+def fig06_pred_vs_true(conn):
+    f = q(conn, "SELECT method_code, true_value, estimated_sales, estimated_low_bound, estimated_high_bound FROM fact_sales_estimation WHERE cohort='truth'")
+    ev = q(conn, "SELECT method_code, sample_size, hit_rate_30pct FROM ads_model_eval_summary WHERE eval_cohort='真值集 全部'").set_index("method_code")
+    panels = [("M1", "M1 文献 k"), ("M4", "M4 树模型 + 近年校准"), ("Signal_B", "信号 B 在线×时长"), ("Fusion_AB", "融合 A+B")]
+    fig, axes = plt.subplots(2, 2, figsize=(11.5, 10))
+    lo, hi = 2.5, 7.8
+    for ax, (code, title) in zip(axes.flat, panels):
+        s = f[f["method_code"] == code]
+        xs = np.linspace(lo, hi, 10)
+        ax.fill_between(xs, xs + np.log10(0.7), xs + np.log10(1.3), color=INK["grid"], alpha=0.9, lw=0, label="±30% 范围")
+        ax.plot(xs, xs, color=INK["secondary"], lw=1)
+        yerr = np.vstack([np.log10(s["estimated_sales"]) - np.log10(s["estimated_low_bound"]),
+                          np.log10(s["estimated_high_bound"]) - np.log10(s["estimated_sales"])])
+        if code == "M4":
+            ax.errorbar(np.log10(s["true_value"]), np.log10(s["estimated_sales"]), yerr=yerr, fmt="none",
+                        ecolor=COLORS[0], alpha=0.35, lw=1)
+        ax.scatter(np.log10(s["true_value"]), np.log10(s["estimated_sales"]), s=22, color=COLORS[0], edgecolor="white", lw=0.6, zorder=3)
+        n, hit = int(ev.loc[code, "sample_size"]), ev.loc[code, "hit_rate_30pct"]
+        ax.set_xlim(lo, hi)
+        ax.set_ylim(lo, hi)
+        style_axes(ax, f"{title}：±30% 命中 {hit:.1f}%（n={n}）", "log₁₀ 公开销量", "log₁₀ 估算销量")
+    axes[0, 1].text(0.03, 0.97, "竖线：交叉验证残差的 10%~90% 区间", transform=axes[0, 1].transAxes, va="top", fontsize=9, color=INK["secondary"])
+    fig.suptitle("真值集：估算 vs 公开销量（对角线 = 估得正好，灰带 = 误差 30% 以内）", fontsize=12, color=INK["primary"])
+    save(fig, "fig06_pred_vs_true_intervals.png")
 
-    # ==========================================================================
-    # 图5：影响 k 的四大核心因素四宫格图（好评率倒 U 形、价格档、游戏类型、中文占比）
-    # ==========================================================================
-    fig, axes = plt.subplots(2, 2, figsize=(13.8, 9.8), dpi=180)
-    ax_a, ax_b, ax_c, ax_d = axes.flatten()
 
-    # (a) 好评率倒 U 形散点与二次曲线拟合（控制价格与年份混杂效应后的净效应对比）
-    pos_x = df_2018["positive_rate"].values * 100.0
-    # 控制价格与年份差异，将 k 标准化到基准价格($15)与基准年份(2015)以消除“差评多为$60全价作”的混杂偏误
-    log_k_adj = (
-        df_2018["log_k"].values
-        + 0.14 * np.log(df_2018["price_usd"].values / 15.0)
-        + 0.048 * (df_2018["release_year"].values - 2015.0)
-    )
-    k_y = np.exp(log_k_adj)
-    ax_a.scatter(pos_x, k_y, alpha=0.45, color="#4E79A7", s=28, label="控制价格/年份后单作样本")
-    bins_pos = [40, 62, 72, 80, 88, 94, 100]
-    bin_centers, bin_medians = [], []
-    for i in range(len(bins_pos) - 1):
-        m = (pos_x >= bins_pos[i]) & (pos_x < bins_pos[i+1])
-        if np.sum(m) > 0:
-            bin_centers.append((bins_pos[i] + bins_pos[i+1]) / 2.0)
-            bin_medians.append(np.median(k_y[m]))
-    ax_a.plot(bin_centers, bin_medians, "o-", color="#D9534F", linewidth=2.5, markersize=7, label="分箱中位数 (70%~75%处达倒U形峰值)")
-    poly_c = np.polyfit(pos_x, k_y, 2)
-    px = np.linspace(45, 99, 100)
-    ax_a.plot(px, np.polyval(poly_c, px), "--", color="#1B365D", linewidth=2.0, label="二次多项式拟合 (开口向下 a2 < 0)")
-    ax_a.set_title("(a) 好评率与 k 的“倒 U 形”关系（两极评论意愿高，中间沉默大多数多）", fontsize=11, fontweight="bold")
-    ax_a.set_xlabel("Steam 好评率 (%)", fontsize=10)
-    ax_a.set_ylabel("实测倍数 k", fontsize=10)
-    ax_a.set_ylim(10, 105)
-    ax_a.legend(fontsize=8.8, frameon=True)
-    ax_a.grid(True, linestyle="--", alpha=0.35)
+def fig07_features(conn):
+    fi = q(conn, "SELECT * FROM ads_feature_importance WHERE feature_code <> 'intercept'")
+    fig, axes = plt.subplots(1, 2, figsize=(14, 6.2))
+    ax = axes[0]
+    s = fi.iloc[::-1]
+    y = np.arange(len(s))
+    ax.errorbar(s["m2_ols_coef"], y, xerr=1.96 * s["m2_std_err"], fmt="o", color=COLORS[0], ecolor=COLORS[0], ms=5, capsize=0)
+    ax.axvline(0, color=INK["secondary"], lw=1)
+    ax.set_yticks(y)
+    ax.set_yticklabels(s["feature_cn_name"])
+    style_axes(ax, "(a) M2 回归系数与 95% 置信区间（因变量 ln k）", "系数", None)
+    ax = axes[1]
+    imp = fi.assign(avg=(fi["m4_rf_importance_pct"] + fi["m4_gbdt_importance_pct"]) / 2).sort_values("avg")
+    ax.barh(imp["feature_cn_name"], imp["avg"], color=COLORS[0], height=0.6)
+    for i, v in enumerate(imp["avg"]):
+        ax.text(v, i, f" {v:.1f}%", va="center", fontsize=9, color=INK["secondary"])
+    style_axes(ax, "(b) M4 特征重要性（随机森林与梯度提升树的平均）", "分裂带来的误差下降占比", None)
+    save(fig, "fig07_feature_importance_m2_m4.png")
 
-    # (b) 价格分档箱线图
-    tiers = ["1_低价独立(<$10)", "2_中低定价($10-$20)", "3_中高等级($20-$40)", "4_全价大作(>=$40)"]
-    tier_labels = ["低价独立\n(<$10)", "中低定价\n($10-$20)", "中高等级\n($20-$40)", "全价大作\n(>=$40)"]
-    box_data = [df_2018[df_2018["price_tier"] == t]["k_ratio"].values for t in tiers]
-    bp = ax_b.boxplot(box_data, labels=tier_labels, patch_artist=True, showmeans=True,
-                       boxprops=dict(facecolor="#A0CBE8", color="#1B365D"),
-                       medianprops=dict(color="#D9534F", linewidth=2.2))
-    for i, d in enumerate(box_data):
-        med = np.median(d)
-        ax_b.text(i + 1, med + 2.5, f"中位:{med:.1f}", ha="center", fontsize=8.8, fontweight="bold", color="#B03A2E")
-    ax_b.set_title("(b) 不同美区价格分档下的实测 k 分布（越便宜冲动购买越多、k 越高）", fontsize=11, fontweight="bold")
-    ax_b.set_ylabel("实测倍数 k", fontsize=10)
-    ax_b.grid(axis="y", linestyle="--", alpha=0.35)
 
-    # (c) 游戏主类型中位数与四分位距对比
-    genre_stats = df_2018.groupby("genre")["k_ratio"].agg(["median", "mean", "count"]).sort_values("median", ascending=True)
-    y_pos = np.arange(len(genre_stats))
-    ax_c.barh(y_pos - 0.16, genre_stats["median"], height=0.32, color="#2B5C8F", label="中位数 (Median k)")
-    ax_c.barh(y_pos + 0.16, genre_stats["mean"], height=0.32, color="#F28E2B", alpha=0.85, label="均值 (Mean k)")
-    ax_c.set_yticks(y_pos)
-    ax_c.set_yticklabels([f"{g} (n={int(c)})" for g, c in zip(genre_stats.index, genre_stats["count"])], fontsize=9.5)
-    for i, med in enumerate(genre_stats["median"]):
-        ax_c.text(med + 0.8, i - 0.16, f"{med:.1f}", va="center", fontsize=8.5, fontweight="bold")
-    ax_c.set_title("(c) 不同游戏类型实测 k 对比（体育/模拟偏高，独立/RPG 核心受众 k 偏低）", fontsize=11, fontweight="bold")
-    ax_c.set_xlabel("实测倍数 k", fontsize=10)
-    ax_c.set_xlim(0, 62)
-    ax_c.legend(fontsize=8.8, frameon=True)
-    ax_c.grid(axis="x", linestyle="--", alpha=0.35)
+def fig08_benchmark(conn):
+    ev = q(conn, "SELECT * FROM ads_model_eval_summary")
+    ours = ev[(ev["eval_cohort"] == "真值集 全部")]
+    gam = ev[ev["eval_cohort"] == "Gamalytic 公布(约120款)"]
+    rows = [(f"本项目 {r.method_code}（n={r.sample_size}）", r.hit_rate_30pct, 0) for r in ours.itertuples() if r.method_code != "Gamalytic_same"]
+    same = ours[ours["method_code"] == "Gamalytic_same"]
+    rows += [(f"Gamalytic 自己的估算，同一批游戏（n={int(same.sample_size.iloc[0])}）", float(same.hit_rate_30pct.iloc[0]), 1)]
+    rows += [(f"{r.method_name}（原文）", r.hit_rate_30pct, 1) for r in gam.itertuples()]
+    rows.sort(key=lambda t: t[1])
+    fig, ax = plt.subplots(figsize=(10, 7))
+    labels = [r[0] for r in rows]
+    vals = [r[1] for r in rows]
+    cols = [COLORS[0] if r[2] == 0 else COLORS[1] for r in rows]
+    ax.barh(labels, vals, color=cols, height=0.62)
+    for i, v in enumerate(vals):
+        ax.text(v, i, f" {v:.1f}%", va="center", fontsize=9, color=INK["secondary"])
+    ax.set_xlim(0, 105)
+    ax.legend(handles=[mpatches.Patch(color=COLORS[0], label="本项目（真值集，留一法）"),
+                       mpatches.Patch(color=COLORS[1], label="Gamalytic")], frameon=False, fontsize=9, loc="lower right")
+    style_axes(ax, "估算落在公开销量 ±30% 以内的比例", "±30% 命中率 (%)", None)
+    save(fig, "fig08_method_benchmark_gamalytic.png")
 
-    # (d) 游玩时长与中文评测占比的双变量散点关系
-    sc_d = ax_d.scatter(
-        np.log10(df_2018["avg_playtime_at_review_hrs"]),
-        df_2018["k_ratio"],
-        c=df_2018["schinese_ratio"] * 100,
-        cmap="coolwarm",
-        s=34,
-        alpha=0.8,
-        edgecolors="black",
-        linewidths=0.3
-    )
-    cb = plt.colorbar(sc_d, ax=ax_d)
-    cb.set_label("简体中文评测占比 (%)", fontsize=9.5)
-    lx = np.log10(df_2018["avg_playtime_at_review_hrs"])
-    sl, ic = np.polyfit(lx, df_2018["k_ratio"], 1)
-    xs_l = np.linspace(lx.min(), lx.max(), 100)
-    ax_d.plot(xs_l, sl * xs_l + ic, color="#1B365D", linewidth=2.2, label=f"趋势线: 玩得越久越容易写评测，k 越低")
-    ax_d.set_title("(d) 游玩时长、中文评测占比与 k 的关系（时长负相关显著，语言效应较弱）", fontsize=11, fontweight="bold")
-    ax_d.set_xlabel("log10(写评测时平均游玩小时数)", fontsize=10)
-    ax_d.set_ylabel("实测倍数 k", fontsize=10)
-    ax_d.legend(fontsize=8.8, frameon=True)
-    ax_d.grid(True, linestyle="--", alpha=0.35)
 
-    plt.suptitle("图5：影响 Boxleiter 销量倍数 k 的多维因素实证分析", fontsize=14, fontweight="bold", y=1.01)
-    plt.tight_layout()
-    plt.savefig(FIG_DIR / "fig05_k_factors_4panels.png", bbox_inches="tight")
-    plt.close()
+def fig09_price(conn):
+    p = q(conn, "SELECT * FROM dim_price_scd2 ORDER BY appid, version_no")
+    if p.empty:
+        print("  (没有价格拉链数据，跳过 fig09)")
+        return
+    counts = p.groupby("appid").size().sort_values(ascending=False)
+    picks = counts.index[:3].tolist()
+    fig, axes = plt.subplots(1, len(picks), figsize=(5 * len(picks), 4.2), squeeze=False)
+    for ax, appid in zip(axes[0], picks):
+        s = p[p["appid"] == appid].copy()
+        s["start"] = pd.to_datetime(s["effective_start"])
+        s["end"] = pd.to_datetime(s["effective_end"].replace("9999-12-31", pd.Timestamp.today().strftime("%Y-%m-%d")))
+        for r in s.itertuples():
+            ax.hlines(r.final_price_usd, r.start, r.end, color=COLORS[0], lw=2.5)
+            if r.discount_percent > 0:
+                ax.hlines(r.base_price_usd, r.start, r.end, color=INK["muted"], lw=1, ls="--")
+            ax.plot([r.start], [r.final_price_usd], "o", color=COLORS[0], ms=5)
+            ax.text(r.start, r.final_price_usd, f" v{r.version_no}", fontsize=8, color=INK["secondary"], va="bottom")
+        ax.set_ylim(0, max(s["base_price_usd"].max() * 1.25, 1))
+        style_axes(ax, f"{s['name'].iloc[0]}（{len(s)} 个版本）", None, "美元")
+        ax.tick_params(axis="x", rotation=30)
+    fig.suptitle("价格拉链表 dim_price_scd2：实线 = 观测到的成交价，虚线 = 打折时的原价（数据：互联网档案馆存档 + 本次采集）",
+                 fontsize=11, color=INK["primary"])
+    save(fig, "fig09_price_scd2_review_timeline.png")
 
-    # ==========================================================================
-    # 图6：近年真值集与跨时代检验集上多模型预测 vs 真值对角散点图 + M3 80% 预测区间误差棒
-    # ==========================================================================
-    fig, axes = plt.subplots(1, 2, figsize=(14.2, 6.0), dpi=180)
-    ax1, ax2 = axes
 
-    sub_mod = df_fact[df_fact["data_cohort"] == "modern_2020"]
-    for m_code, col, mk, lbl in [
-        ("M0", "#999999", "x", "M0: 固定倍数 (命中率 50.0%)"),
-        ("M2", "#4E79A7", "^", "M2: 对数线性回归+年代校准 (命中率 62.5%)"),
-        ("M4", "#F28E2B", "s", "M4: 树模型集成+年代校准 (命中率 62.5%)"),
-        ("Fusion_AB", "#D9534F", "o", "Fusion_AB: 双信号加权融合 (命中率 81.2%)"),
-    ]:
-        d_m = sub_mod[sub_mod["method_code"] == m_code]
-        ax1.scatter(np.log10(d_m["true_sales_or_players"]), np.log10(d_m["estimated_sales"]),
-                    color=col, marker=mk, s=48 if m_code == "Fusion_AB" else 34, alpha=0.85, label=lbl)
-
-    lims = [4.6, 7.2]
-    ax1.plot(lims, lims, "k-", linewidth=1.8, label="理想无偏对角线 (Y_est = Y_true)")
-    ax1.fill_between(lims, [x + math.log10(0.7) for x in lims], [x + math.log10(1.3) for x in lims],
-                     color="#2E8B57", alpha=0.15, label="±30% 误差合格带")
-    ax1.set_xlim(lims)
-    ax1.set_ylim(lims)
-    ax1.set_title("(a) 2020+ 近年公开销量真值集 (N=32) 预测 vs 真值对比", fontsize=11.5, fontweight="bold")
-    ax1.set_xlabel("log10(官方公布真实销量)", fontsize=10.5)
-    ax1.set_ylabel("log10(模型估算销量)", fontsize=10.5)
-    ax1.legend(loc="upper left", fontsize=8.6, frameon=True)
-    ax1.grid(True, linestyle="--", alpha=0.35)
-
-    # (b) 代表性游戏 M3 / Fusion_AB 估算值与 80% 置信区间误差棒对比真值
-    sample_games = df_fact[(df_fact["data_cohort"].isin(["modern_2020", "cross_era"])) & (df_fact["method_code"] == "M3")].sort_values("true_sales_or_players", ascending=True).tail(14)
-    y_idx = np.arange(len(sample_games))
-    true_log = np.log10(sample_games["true_sales_or_players"].values)
-    est_log = np.log10(sample_games["estimated_sales"].values)
-    low_err = est_log - np.log10(sample_games["estimated_low_bound"].values)
-    high_err = np.log10(sample_games["estimated_high_bound"].values) - est_log
-
-    ax2.errorbar(est_log, y_idx, xerr=[low_err, high_err], fmt="o", color="#2B5C8F", ecolor="#7FB3D5",
-                 elinewidth=2.4, capsize=4, label="模型点估计与 80% 预测区间 [P10, P90]")
-    ax2.scatter(true_log, y_idx, color="#D9534F", marker="*", s=110, zorder=5, label="官方公布真实销量 (Ground Truth)")
-    ax2.set_yticks(y_idx)
-    ax2.set_yticklabels([n[:24] for n in sample_games["game_name"]], fontsize=8.8)
-    ax2.set_title("(b) 代表性游戏销量点估计与 80% 预测区间覆盖检验", fontsize=11.5, fontweight="bold")
-    ax2.set_xlabel("log10(销量份数)", fontsize=10.5)
-    ax2.legend(loc="lower right", fontsize=9, frameon=True)
-    ax2.grid(axis="x", linestyle="--", alpha=0.35)
-
-    plt.suptitle("图6：近年真值与跨时代样本的多模型预测精度及区间估计检验", fontsize=13.5, fontweight="bold", y=1.01)
-    plt.tight_layout()
-    plt.savefig(FIG_DIR / "fig06_pred_vs_true_intervals.png", bbox_inches="tight")
-    plt.close()
-
-    # ==========================================================================
-    # 图7：M2 对数线性回归 t 统计量 vs M4 随机森林/GBDT 特征重要性双联图
-    # ==========================================================================
-    fig, axes = plt.subplots(1, 2, figsize=(14.2, 5.6), dpi=180)
-    ax1, ax2 = axes
-
-    df_f_sub = df_feat[df_feat["feature_code"] != "intercept"].copy()
-    df_f_sub = df_f_sub.sort_values("m4_gbdt_importance_pct", ascending=True)
-    y_pos = np.arange(len(df_f_sub))
-
-    colors_t = ["#D9534F" if v < 0 else "#2B5C8F" for v in df_f_sub["m2_t_stat"]]
-    ax1.barh(y_pos, df_f_sub["m2_t_stat"], color=colors_t, alpha=0.88, height=0.62)
-    ax1.axvline(0, color="black", linewidth=1)
-    ax1.axvline(-1.96, color="#D9534F", linestyle="--", linewidth=1.2, label="p=0.05 显著性阈值 (|t|=1.96)")
-    ax1.axvline(1.96, color="#2B5C8F", linestyle="--", linewidth=1.2)
-    ax1.set_yticks(y_pos)
-    ax1.set_yticklabels(df_f_sub["feature_cn_name"], fontsize=9)
-    ax1.set_title("(a) M2 对数线性回归各特征 t 统计量（红=负相关，蓝=正相关）", fontsize=11.5, fontweight="bold")
-    ax1.set_xlabel("t 统计量 (t-statistic)", fontsize=10)
-    ax1.legend(loc="lower left", fontsize=8.8)
-    ax1.grid(axis="x", linestyle="--", alpha=0.35)
-
-    ax2.barh(y_pos - 0.16, df_f_sub["m4_gbdt_importance_pct"], height=0.32, color="#2E8B57", label="GBDT 梯度提升树重要性 (%)")
-    ax2.barh(y_pos + 0.16, df_f_sub["m4_rf_importance_pct"], height=0.32, color="#F28E2B", label="Random Forest 随机森林重要性 (%)")
-    ax2.set_yticks(y_pos)
-    ax2.set_yticklabels(df_f_sub["feature_cn_name"], fontsize=9)
-    for i, (gb_v, rf_v) in enumerate(zip(df_f_sub["m4_gbdt_importance_pct"], df_f_sub["m4_rf_importance_pct"])):
-        ax2.text(max(gb_v, rf_v) + 0.4, i, f"{gb_v:.1f}% / {rf_v:.1f}%", va="center", fontsize=8)
-    ax2.set_xlim(0, max(df_f_sub["m4_gbdt_importance_pct"].max(), df_f_sub["m4_rf_importance_pct"].max()) * 1.22)
-    ax2.set_title("(b) M4 树模型特征重要性占比（好评率二次项、年份、价格、时长主导）", fontsize=11.5, fontweight="bold")
-    ax2.set_xlabel("特征重要性贡献占比 (%)", fontsize=10)
-    ax2.legend(loc="lower right", fontsize=9)
-    ax2.grid(axis="x", linestyle="--", alpha=0.35)
-
-    plt.suptitle("图7：M2 参数统计推断与 M4 非线性树模型特征重要性对比", fontsize=13.5, fontweight="bold", y=1.01)
-    plt.tight_layout()
-    plt.savefig(FIG_DIR / "fig07_feature_importance_m2_m4.png", bbox_inches="tight")
-    plt.close()
-
-    # ==========================================================================
-    # 图8：方法对比柱状图（±30% 命中率对标 Gamalytic 商业基准）+ 相对误差箱线图
-    # ==========================================================================
-    fig, axes = plt.subplots(1, 2, figsize=(14.5, 5.8), dpi=180)
-    ax1, ax2 = axes
-
-    mod_eval = df_eval[df_eval["eval_cohort"].str.startswith("Modern_2020")].set_index("method_code")
-    gam_eval = df_eval[df_eval["eval_cohort"] == "Gamalytic_Benchmark (N=120)"].set_index("method_code")
-
-    compare_labels = [
-        "固定倍数法\n(M0 vs Gamalytic)",
-        "多因素修正k\n(M2回归 vs Gamalytic)",
-        "树模型修正k\n(M4 GBDT/RF)",
-        "在线人数+时长\n(信号B vs Gamalytic)",
-        "多信号加权融合\n(Fusion_AB vs Gamalytic)"
-    ]
-    our_hits = [
-        mod_eval.loc["M0", "hit_rate_30pct"],
-        mod_eval.loc["M2", "hit_rate_30pct"],
-        mod_eval.loc["M4", "hit_rate_30pct"],
-        mod_eval.loc["Signal_B", "hit_rate_30pct"],
-        mod_eval.loc["Fusion_AB", "hit_rate_30pct"],
-    ]
-    gam_hits = [
-        gam_eval.loc["G_Fixed", "hit_rate_30pct"],
-        gam_eval.loc["G_Adjusted", "hit_rate_30pct"],
-        gam_eval.loc["G_Adjusted", "hit_rate_30pct"],
-        gam_eval.loc["G_CCU_Playtime", "hit_rate_30pct"],
-        gam_eval.loc["G_Fusion", "hit_rate_30pct"],
-    ]
-
-    x_c = np.arange(len(compare_labels))
-    b1 = ax1.bar(x_c - 0.18, our_hits, width=0.35, color="#1B365D", label="本系统实测 ±30% 命中率 (2020+真值集)")
-    b2 = ax1.bar(x_c + 0.18, gam_hits, width=0.35, color="#E15759", alpha=0.88, label="Gamalytic (2023) 公布商业基准 (120款)")
-    ax1.axhline(55.0, color="#777777", linestyle="--", linewidth=1.4, label="单一评测信号准确率天花板 (~50%-62%)")
-
-    for bar in b1:
-        ax1.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 1.2, f"{bar.get_height():.1f}%", ha="center", fontsize=8.5, fontweight="bold", color="#1B365D")
-    for bar in b2:
-        ax1.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 1.2, f"{bar.get_height():.1f}%", ha="center", fontsize=8.5, color="#B03A2E")
-
-    ax1.set_xticks(x_c)
-    ax1.set_xticklabels(compare_labels, fontsize=9)
-    ax1.set_ylim(0, 96)
-    ax1.set_ylabel("落在真实销量 ±30% 误差内的比例 (%)", fontsize=10.5)
-    ax1.set_title("(a) 各方法 ±30% 命中率实测值与 Gamalytic 商业基准对标", fontsize=11.5, fontweight="bold")
-    ax1.legend(loc="upper left", fontsize=8.8, frameon=True)
-    ax1.grid(axis="y", linestyle="--", alpha=0.35)
-
-    # (b) 本系统 7 种方法在近年真值集上的百分比误差分布箱线图
-    m_order = ["M0", "M1", "M2", "M3", "M4", "Signal_B", "Fusion_AB"]
-    err_data = [sub_mod[sub_mod["method_code"] == m]["pct_error_val"].values for m in m_order]
-    bp2 = ax2.boxplot(err_data, labels=m_order, patch_artist=True,
-                      boxprops=dict(facecolor="#D4E6F1", color="#1B365D"),
-                      medianprops=dict(color="#D9534F", linewidth=2.2))
-    ax2.axhline(0, color="black", linewidth=1.2)
-    ax2.axhspan(-30, 30, color="#2E8B57", alpha=0.14, label="±30% 误差合格区间")
-    ax2.set_title("(b) 7 种估算方法的相对误差 (Y_est - Y_true)/Y_true 分布收敛过程", fontsize=11.5, fontweight="bold")
-    ax2.set_xlabel("估算方法编码 (Method Code)", fontsize=10.5)
-    ax2.set_ylabel("相对百分比误差 (%)", fontsize=10.5)
-    ax2.set_ylim(-85, 115)
-    ax2.legend(loc="upper right", fontsize=9, frameon=True)
-    ax2.grid(axis="y", linestyle="--", alpha=0.35)
-
-    plt.suptitle("图8：单一评测信号天花板验证与双信号融合准确率对标 (Gamalytic Benchmark)", fontsize=13.5, fontweight="bold", y=1.01)
-    plt.tight_layout()
-    plt.savefig(FIG_DIR / "fig08_method_benchmark_gamalytic.png", bbox_inches="tight")
-    plt.close()
-
-    # ==========================================================================
-    # 图9：SCD Type 2 价格时间线叠加每日新增评测与在线人数增长曲线（演示增量与拉链联动）
-    # ==========================================================================
-    fig, axes = plt.subplots(2, 1, figsize=(11.5, 7.2), dpi=180, sharex=True)
-    ax1, ax2 = axes
-
-    w3 = df_timeline[df_timeline["appid"] == 292030].sort_values("snapshot_date")
-    hk = df_timeline[df_timeline["appid"] == 367520].sort_values("snapshot_date")
-    days = [d[-5:] for d in w3["snapshot_date"]]
-
-    # 上图：The Witcher 3 价格 SCD2 阶梯线 + 每日新增评测柱状图
-    ax1_r = ax1.twinx()
-    bars_w3 = ax1.bar(days, w3["daily_new_reviews"], color="#4E79A7", alpha=0.78, width=0.55, label="巫师3：每日新增评测数（条/日）")
-    line_p1 = ax1_r.step(days, w3["final_price_usd"], where="mid", color="#D9534F", linewidth=2.8, marker="o", label="巫师3：SCD2 生效折后价 ($)")
-    ax1.axvspan(0 - 0.3, 6 + 0.3, color="#FADBD8", alpha=0.25, label="SCD2 版本v2生效期：秋季特卖 -75% ($9.99)")
-    ax1.set_title("(a) 《The Witcher 3》SCD Type 2 价格版本切换与每日新增评测增速联动（模拟增量演示数据）", fontsize=11.5, fontweight="bold")
-    ax1.set_ylabel("每日新增评测数（条）", fontsize=10, color="#2B5C8F")
-    ax1_r.set_ylabel("SCD2 当前生效价格 ($ USD)", fontsize=10, color="#D9534F")
-    ax1_r.set_ylim(0, 48)
-    ax1.legend(loc="upper left", fontsize=8.8)
-    ax1_r.legend(loc="upper right", fontsize=8.8)
-    ax1.grid(axis="y", linestyle="--", alpha=0.35)
-
-    # 下图：Hollow Knight 价格 SCD2 阶梯线 + 当日峰值在线人数曲线
-    ax2_r = ax2.twinx()
-    ax2.plot(days, hk["current_players"], color="#2E8B57", marker="s", linewidth=2.4, label="空洞骑士：当日峰值在线人数 (CCU)")
-    ax2.bar(days, hk["daily_new_reviews"] * 40, color="#A9DFBF", alpha=0.55, width=0.5, label="空洞骑士：每日新增评测数 × 40 (同比例缩放)")
-    ax2_r.step(days, hk["final_price_usd"], where="mid", color="#E67E22", linewidth=2.6, marker="^", label="空洞骑士：SCD2 生效折后价 ($)")
-    ax2.axvspan(1 - 0.3, 7 + 0.3, color="#FCF3CF", alpha=0.35, label="SCD2 版本v2生效期：五折特惠 ($7.49)")
-    ax2.set_title("(b) 《Hollow Knight》五折促销期间 SCD2 价格拉链、在线人数与评测增长联动", fontsize=11.5, fontweight="bold")
-    ax2.set_xlabel("每日增量快照日期 (2026-10-01 至 2026-10-14)", fontsize=10.5)
-    ax2.set_ylabel("在线人数 / 缩放评测增量", fontsize=10, color="#2E8B57")
-    ax2_r.set_ylabel("SCD2 当前生效价格 ($ USD)", fontsize=10, color="#E67E22")
-    ax2_r.set_ylim(0, 20)
-    ax2.legend(loc="upper left", fontsize=8.8)
-    ax2_r.legend(loc="upper right", fontsize=8.8)
-    ax2.grid(axis="y", linestyle="--", alpha=0.35)
-
-    plt.suptitle("图9：价格维度 SCD Type 2 历史拉链与周期快照事实表 (fact_daily_snapshot) 联立分析", fontsize=13.5, fontweight="bold", y=1.01)
-    plt.tight_layout()
-    plt.savefig(FIG_DIR / "fig09_price_scd2_review_timeline.png", bbox_inches="tight")
-    plt.close()
-
-    # ==========================================================================
-    # 图10：系统 6 层技术架构图与星型模型数据流向图（供报告概要设计章节直接插图）
-    # ==========================================================================
-    fig, ax = plt.subplots(figsize=(13.5, 7.5), dpi=180)
+def fig10_architecture(conn):
+    rep = (BASE_DIR / "data" / "cleaned" / "explain_comparison_report.txt").read_text(encoding="utf-8")
+    speed = re.search(r"提速倍数: ([\d.]+)x", rep)
+    n = dict(conn.execute("SELECT cohort, COUNT(*) FROM dwd_game_sample WHERE model_eligible=1 GROUP BY cohort").fetchall())
+    fig, ax = plt.subplots(figsize=(13.5, 7.6))
     ax.set_xlim(0, 100)
     ax.set_ylim(0, 100)
     ax.axis("off")
-
     layers = [
-        (84, 12, "#EBF5FB", "#2874A6", "第1层：多源数据采集层 (Data Acquisition)",
-         "• 2018 Ars Technica 成就泄露快照 CSV (1.3万款基准)\n• Steam 商店接口 appdetails & 新版评测接口 GetAppReviews/v1\n• 官方新闻 GetNewsForApp/v2 (真值扫描)  • SteamCharts & SteamSpy (信号B在线与时长)"),
-        (68, 12, "#E8F8F5", "#117A65", "第2层：ETL 编程与 Kettle 转换层 (ETL & Governance)",
-         "• Python + Kettle (clean_steam_games.ktr / scd2_price_history.ktr)\n• 异常清洗与审计 (etl_clean_error_log)  • 断点续传 (etl_checkpoint)  • 增量水位线与日志 (etl_job_log)"),
-        (51, 13, "#FEF9E7", "#B7950B", "第3层：三层数据仓库与星型模型存储层 (MySQL 8.0 / SQLite DW)",
-         "• 原始层 (ods_*) -> 明细与维度层 (dwd_*, dim_game, dim_genre, dim_release_date, dim_estimation_method, dim_price_scd2)\n• 结果与事实层 (fact_sales_estimation, fact_daily_snapshot, ads_model_eval_summary, ads_feature_importance)"),
-        (34, 13, "#FDEDEC", "#B03A2E", "第4层：多信号建模与年代校准引擎 (Multi-Signal Analytics)",
-         "• SQL模型：M0 (固定倍数30)、M1 (按年份文献分段) + 窗口函数求 k 中位数与流派排名\n• Python模型：M2 (对数线性回归) + M3 (分位数区间) + M4 (RF/GBDT树模型) + 2019年代校准 + 信号B与双信号融合"),
-        (18, 12, "#F4ECF7", "#6C3483", "第5层：只读视图与索引加速层 (Semantic Views & Indexing)",
-         "• 6个 FineBI 专用只读视图 (vw_finebi_star_sales_switch 等) 隔离底层表\n• 复合索引优化 (idx_fact_cohort_method 等) + EXPLAIN 执行计划验证 (查询提速 1.92x)"),
-        (2, 12, "#EAEDED", "#2C3E50", "第6层：FineBI 智能分析大屏与学术报告交付层 (BI & Visualization)",
-         "• FineBI 估算方法切片器整屏动态联动 (M0/M1/M2/M3/M4/Signal_B/Fusion_AB)\n• 2019政策断崖分析、倒U形好评率曲率、Gamalytic商业基准对标、SCD2价格拉链时间线"),
+        ("1 数据采集", "Ars Technica 2018 泄露表 · Steam appdetails · GetAppReviews(input_json, 按日期截断) · SteamCharts 月度在线\n"
+                     "Gamalytic 测试表(118 条公开销量及出处) · 互联网档案馆商店页存档(价格历史) · 每小时快照"),
+        ("2 ETL", "Python：请求缓存与断点续传、分批事务 + etl_checkpoint 续跑、清洗规则写 etl_clean_error_log、\n"
+                  "SCD2 价格拉链、按 fetched_at 水位线增量抽取快照；Kettle：clean_steam_games.ktr / scd2_price_history.ktr"),
+        ("3 数据仓库", "原始层 ods_*  →  明细层 dwd_game_sample + 维度 dim_game / dim_genre / dim_release_date / dim_estimation_method / dim_price_scd2\n"
+                      "→  结果层 fact_sales_estimation（样本 × 方法）、fact_snapshot、ads_*；SQLite 构建，脚本可导入 MySQL 8.0"),
+        ("4 分析建模", f"SQL：M0、M1、窗口函数求 k 中位数；Python：M2 回归、M3 分位数、M4 树模型、信号 B、融合\n"
+                      f"2018 训练 {n.get('train_2018', 0)} 款五折交叉验证；真值 {n.get('truth', 0)} 款，政策系数与融合权重一律留一法"),
+        ("5 视图与索引", "8 个 FineBI 只读视图；复合索引 + EXPLAIN 对比" + (f"（本机实测提速 {speed.group(1)}x）" if speed else "")),
+        ("6 展示", "FineBI 大屏（估算方法切片器整屏联动）· 报告统计图 · 与 Gamalytic 同口径对标"),
     ]
+    h, gap, top = 13.2, 3.0, 97
+    for i, (title, body) in enumerate(layers):
+        y = top - (i + 1) * h - i * gap
+        ax.add_patch(mpatches.FancyBboxPatch((3, y), 94, h, boxstyle="round,pad=0.4",
+                                             facecolor="#f4f7fc", edgecolor=COLORS[0], linewidth=1.4))
+        ax.text(5, y + h - 3.0, title, fontsize=11, fontweight="bold", color=INK["primary"])
+        ax.text(5, y + 1.6, body, fontsize=8.8, color=INK["secondary"], linespacing=1.4)
+        if i < len(layers) - 1:
+            ax.annotate("", xy=(50, y - gap + 0.3), xytext=(50, y - 0.3),
+                        arrowprops=dict(arrowstyle="->", color=INK["muted"], lw=1.5))
+    save(fig, "fig10_system_architecture_and_er.png")
 
-    for y_bottom, height, bg_col, border_col, title_txt, body_txt in layers:
-        rect = mpatches.FancyBboxPatch((4, y_bottom), 92, height, boxstyle="round,pad=0.6",
-                                       facecolor=bg_col, edgecolor=border_col, linewidth=2.0)
-        ax.add_patch(rect)
-        ax.text(6, y_bottom + height - 3.2, title_txt, fontsize=11.2, fontweight="bold", color=border_col)
-        ax.text(6, y_bottom + 2.0, body_txt, fontsize=9.2, color="#222222", linespacing=1.35)
-        if y_bottom > 5:
-            ax.annotate("", xy=(50, y_bottom - 0.3), xytext=(50, y_bottom - 3.6),
-                        arrowprops=dict(arrowstyle="<-", color="#555555", lw=2.2))
 
-    ax.set_title("图10：基于 ETL 的 Steam 游戏销量估算与智能分析系统 —— 六层技术架构图", fontsize=14, fontweight="bold", pad=10)
-    plt.tight_layout()
-    plt.savefig(FIG_DIR / "fig10_system_architecture_and_er.png", bbox_inches="tight")
-    plt.close()
-
-    print("=== 全套 10 张统计与架构图表绘制完成 ===")
-    for p in sorted(FIG_DIR.glob("*.png")):
-        print("  -", p.name)
+def main():
+    conn = sqlite3.connect(str(DB_PATH))
+    for fn in [fig03_overview, fig04_policy, fig05_factors, fig06_pred_vs_true, fig07_features,
+               fig08_benchmark, fig09_price, fig10_architecture]:
+        fn(conn)
+    conn.close()
 
 
 if __name__ == "__main__":
-    generate_all_figures()
+    main()

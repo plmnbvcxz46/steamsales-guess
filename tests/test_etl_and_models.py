@@ -1,25 +1,37 @@
 # -*- coding: utf-8 -*-
 """
-系统自动化单元测试与集成测试脚本 (tests/test_etl_and_models.py)
-对应课程报告第 6 章（系统测试）：
-1. 测试三层数据仓库表与 6 个 FineBI 视图的完整性（439 款游戏 × 11 种估算方法 = 4,829 行事实表记录）；
-2. 测试数据清洗规则：确认免费游戏 (is_free=1)、Demo、非游戏工具、负价格与零评测异常 100% 被拦截并写入 etl_clean_error_log；
-3. 测试断点续传检查点表 (etl_checkpoint) 与运行日志表 (etl_job_log) 状态；
-4. 测试价格维度 SCD Type 2 拉链表 (dim_price_scd2) 的版本连续性与当前唯一性约束；
-5. 测试 SQL 窗口函数中位数计算的准确性（与 NumPy median 对比误差 < 0.01）；
-6. 测试多信号模型与 6 大科学假设 (H1~H6) 消融实验：验证双信号融合 Fusion_AB、精修评测 M4_Plus 以及四信号动态融合 M6_Quad_Fusion 阶梯式提升精度。
+自动化测试 (tests/test_etl_and_models.py)，对应报告第 6 章。
+先跑完 etl_pipeline.py 和 models.py 再运行：python tests/test_etl_and_models.py
+
+1. 分层完整：每个可建模样本在事实表里都有该有的方法行
+2. 清洗规则：明细层里没有免费/非游戏/无价格/零评测/上架晚于截止日的记录
+3. 不泄露：改动第 i 款游戏的真值，它自己的估算不变（留一法、嵌套留一法都要满足）
+4. 不泄露：模型输入特征与真值无关（把真值打乱，特征矩阵一模一样）
+5. SCD2：每款游戏恰好一个当前版本，版本首尾相接
+6. 窗口函数中位数 = NumPy 中位数
+7. 断点续传：中途中断再续跑，结果与一次跑完完全相同
+8. 增量抽取：水位线等于已入库的最大时间，再跑一次不会重复装载
+9. 索引：建索引后执行计划改走索引
 """
+import sys
+import shutil
 import sqlite3
 import pathlib
+import tempfile
 import unittest
+
 import numpy as np
 import pandas as pd
 
 BASE_DIR = pathlib.Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(BASE_DIR / "src"))
+import etl_pipeline  # noqa: E402
+import models  # noqa: E402
+
 DB_PATH = BASE_DIR / "data" / "steam_sales_dw.db"
 
 
-class TestSteamSalesETLSystem(unittest.TestCase):
+class TestSteamSalesSystem(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.conn = sqlite3.connect(str(DB_PATH))
@@ -28,73 +40,136 @@ class TestSteamSalesETLSystem(unittest.TestCase):
     def tearDownClass(cls):
         cls.conn.close()
 
-    def test_01_dw_layers_and_row_counts(self):
-        """测试1：验证原始层、明细维度层、事实结果层及运维表记录数正确"""
-        ods_cnt = self.conn.execute("SELECT COUNT(*) FROM ods_leak_players_2018").fetchone()[0]
-        dwd_cnt = self.conn.execute("SELECT COUNT(*) FROM dwd_steam_game_aligned").fetchone()[0]
-        err_cnt = self.conn.execute("SELECT COUNT(*) FROM etl_clean_error_log").fetchone()[0]
-        fact_cnt = self.conn.execute("SELECT COUNT(*) FROM fact_sales_estimation").fetchone()[0]
-        self.assertEqual(ods_cnt, 413)
-        self.assertEqual(err_cnt, 18)
-        self.assertEqual(dwd_cnt, 439)  # 395款2018买断制 + 36款2020-2025真值 + 8款跨时代检验
-        self.assertEqual(fact_cnt, 439 * 11)  # 每款游戏 × 11 种估算方法 = 4,829 行
+    def q(self, sql):
+        return pd.read_sql_query(sql, self.conn)
 
-    def test_02_data_cleaning_strictness(self):
-        """测试2：确认明细层 dwd_steam_game_aligned 中不含任何免费游戏、非游戏软件或价格<=0的异常记录"""
-        bad_price = self.conn.execute("SELECT COUNT(*) FROM dwd_steam_game_aligned WHERE price_usd <= 0 OR total_reviews <= 0").fetchone()[0]
-        self.assertEqual(bad_price, 0)
-        rule_codes = set(r[0] for r in self.conn.execute("SELECT DISTINCT rule_code FROM etl_clean_error_log").fetchall())
-        self.assertTrue({"FREE_GAME", "NON_GAME_SOFTWARE", "DEMO_VERSION", "INVALID_PRICE", "ZERO_REVIEWS"}.issubset(rule_codes))
+    def test_01_layers_and_fact_completeness(self):
+        n_ars = self.conn.execute("SELECT COUNT(*) FROM ods_ars_players_2018").fetchone()[0]
+        self.assertEqual(n_ars, 13281)  # 原始 CSV 的全部行（含 6 组重复）原样入原始层
+        n_tr = self.conn.execute("SELECT COUNT(*) FROM dwd_game_sample WHERE cohort='train_2018' AND model_eligible=1").fetchone()[0]
+        n_te = self.conn.execute("SELECT COUNT(*) FROM dwd_game_sample WHERE cohort='truth'").fetchone()[0]
+        self.assertGreater(n_tr, 300)
+        self.assertGreater(n_te, 50)
+        f = self.q("SELECT cohort, method_code, COUNT(*) n FROM fact_sales_estimation GROUP BY 1, 2")
+        cnt = {(r.cohort, r.method_code): r.n for r in f.itertuples()}
+        for m in ["M0", "M1", "M2", "M3", "M4"]:
+            self.assertEqual(cnt[("train_2018", m)], n_tr)
+        for m in ["M0", "M1", "M2", "M3", "M4", "Fusion_AB"]:
+            self.assertEqual(cnt[("truth", m)], n_te)
 
-    def test_03_scd2_price_dimension_integrity(self):
-        """测试3：验证 SCD Type 2 拉链表每款游戏的 is_current=1 版本唯一，且巫师3具有 3 个历史递进版本"""
-        w3_versions = self.conn.execute(
-            "SELECT version_no, final_price_usd, effective_start, effective_end, is_current FROM dim_price_scd2 WHERE appid = 292030 ORDER BY version_no ASC"
-        ).fetchall()
-        self.assertEqual(len(w3_versions), 3)
-        self.assertEqual(w3_versions[0][4], 0)  # v1 已闭合
-        self.assertEqual(w3_versions[1][4], 0)  # v2 已闭合
-        self.assertEqual(w3_versions[2][4], 1)  # v3 当前生效
-        self.assertEqual(w3_versions[2][3], "9999-12-31")
+    def test_02_cleaning_rules(self):
+        bad = self.conn.execute(
+            """SELECT COUNT(*) FROM dwd_game_sample WHERE price_usd <= 0 OR total_reviews <= 0
+               OR release_date > cutoff_date""").fetchone()[0]
+        self.assertEqual(bad, 0)
+        free_in_dwd = self.conn.execute(
+            """SELECT COUNT(*) FROM dwd_game_sample d JOIN ods_steam_appdetails a ON a.appid = d.appid
+               WHERE a.is_free = 1 OR a.app_type <> 'game' OR a.success = 0""").fetchone()[0]
+        self.assertEqual(free_in_dwd, 0)
+        codes = {r[0] for r in self.conn.execute("SELECT DISTINCT rule_code FROM etl_clean_error_log")}
+        self.assertTrue({"FREE_GAME", "NO_PRICE", "TRUNCATION_RISK"}.issubset(codes))
+        # 被标记 TRUNCATION_RISK 的样本都不参与建模
+        n = self.conn.execute("SELECT COUNT(*) FROM dwd_game_sample WHERE cohort='train_2018' AND total_reviews < ? AND model_eligible = 1",
+                              (etl_pipeline.MIN_REVIEWS_2018,)).fetchone()[0]
+        self.assertEqual(n, 0)
 
-    def test_04_sql_window_median_accuracy(self):
-        """测试4：验证 SQL 窗口函数 (ROW_NUMBER + COUNT OVER) 计算的 k 中位数与 Python NumPy 计算结果完全一致"""
-        df_dwd = pd.read_sql_query("SELECT release_year, k_ratio FROM dwd_steam_game_aligned WHERE data_cohort IN ('train_2018', 'modern_2020')", self.conn)
-        df_view = pd.read_sql_query("SELECT release_year, median_k FROM vw_finebi_k_median_by_year", self.conn)
-        for _, r in df_view.iterrows():
-            yr = int(r["release_year"])
-            sql_med = float(r["median_k"])
-            py_med = float(np.median(df_dwd[df_dwd["release_year"] == yr]["k_ratio"].values))
-            self.assertAlmostEqual(sql_med, py_med, places=1)
+    def _truth_inputs(self):
+        df = self.q("SELECT * FROM dwd_game_sample ORDER BY sample_id")
+        tr = df[(df["cohort"] == "train_2018") & (df["model_eligible"] == 1)].reset_index(drop=True)
+        te = df[df["cohort"] == "truth"].reset_index(drop=True)
+        pt = float(tr["playtime_review_median_hrs"].median())
+        X_tr, _ = models.build_features(tr, pt)
+        X_te, _ = models.build_features(te, pt)
+        beta = models.fit_ols(X_tr, tr["log_k"].values)["beta"]
+        off = X_te @ beta
+        Z = models.recal_design(te, X_te)
+        y_lk = np.log(te["truth_value"].values / te["total_reviews"].values)
+        return te, Z, off, y_lk
 
-    def test_05_multi_signal_fusion_superiority(self):
-        """测试5：验证在 2020-2025 近年真值集上，M2/M4 优于 M0，且双信号融合 Fusion_AB 与四信号融合 M6_Quad_Fusion 显著突破精度上限"""
-        df_eval = pd.read_sql_query(
-            "SELECT * FROM ads_model_eval_summary WHERE eval_cohort LIKE 'Modern_2020%'",
-            self.conn
-        ).set_index("method_code")
-        hit_m0 = df_eval.loc["M0", "hit_rate_30pct"]
-        hit_m2 = df_eval.loc["M2", "hit_rate_30pct"]
-        hit_m4_plus = df_eval.loc["M4_Plus", "hit_rate_30pct"]
-        hit_sigb = df_eval.loc["Signal_B", "hit_rate_30pct"]
-        hit_fusion = df_eval.loc["Fusion_AB", "hit_rate_30pct"]
-        hit_m6 = df_eval.loc["M6_Quad_Fusion", "hit_rate_30pct"]
-        self.assertGreater(hit_m2, hit_m0)
-        self.assertGreater(hit_m4_plus, hit_m2)
-        self.assertGreater(hit_sigb, hit_m0)
-        self.assertGreater(hit_fusion, hit_m2)
-        self.assertGreaterEqual(hit_fusion, 80.0)
-        self.assertGreater(hit_m6, hit_fusion)
+    def test_03_no_leakage_loo(self):
+        te, Z, off, y_lk = self._truth_inputs()
+        base = models.loo_recal(Z, off, y_lk)
+        for i in [0, len(y_lk) // 2, len(y_lk) - 1]:
+            y2 = y_lk.copy()
+            y2[i] += 5.0  # 把第 i 款的真值放大 e^5 倍
+            again = models.loo_recal(Z, off, y2)
+            self.assertAlmostEqual(base[i], again[i], places=9)  # 它自己的估算不受影响
+        # 嵌套留一法融合同理
+        has_b = np.array([True] * len(y_lk))
+        log_n = np.log(te["total_reviews"].values)
+        log_b = log_n + 3.0 + 0.1 * np.arange(len(y_lk)) / len(y_lk)
+        f0, _ = models.nested_loo_fusion(Z, off, y_lk, log_n, log_b, has_b)
+        y2 = y_lk.copy()
+        y2[3] -= 4.0
+        f1, _ = models.nested_loo_fusion(Z, off, y2, log_n, log_b, has_b)
+        self.assertAlmostEqual(f0[3], f1[3], places=9)
 
-    def test_06_hypothesis_ablation_monotonicity(self):
-        """测试6：验证 6 大科学假设消融实验表 (ads_hypothesis_ablation) 中 MAPE 单调递减、±30% 命中率单调递增"""
-        df_abl = pd.read_sql_query("SELECT * FROM ads_hypothesis_ablation", self.conn)
-        self.assertEqual(len(df_abl), 7)
-        mapes = df_abl["mape_pct"].values
-        hits30 = df_abl["hit_rate_30pct"].values
-        for i in range(1, len(mapes)):
-            self.assertLess(mapes[i], mapes[i - 1], f"Stage {i} MAPE should be lower than stage {i-1}")
-            self.assertGreaterEqual(hits30[i], hits30[i - 1], f"Stage {i} Hit30 should be >= stage {i-1}")
+    def test_04_features_do_not_depend_on_truth(self):
+        df = self.q("SELECT * FROM dwd_game_sample WHERE cohort='truth' ORDER BY sample_id")
+        X1, _ = models.build_features(df, 10.0)
+        df2 = df.copy()
+        df2["truth_value"] = np.random.default_rng(0).permutation(df2["truth_value"].values)
+        df2["k_ratio"] = df2["truth_value"] / df2["total_reviews"]
+        df2["log_k"] = np.log(df2["k_ratio"])
+        X2, _ = models.build_features(df2, 10.0)
+        self.assertTrue(np.array_equal(X1, X2))
+
+    def test_05_scd2_integrity(self):
+        p = self.q("SELECT * FROM dim_price_scd2 ORDER BY appid, version_no")
+        if p.empty:
+            self.skipTest("没有价格拉链数据")
+        for appid, g in p.groupby("appid"):
+            self.assertEqual(int(g["is_current"].sum()), 1)
+            self.assertEqual(g[g["is_current"] == 1]["effective_end"].iloc[0], "9999-12-31")
+            self.assertEqual(list(g["version_no"]), list(range(1, len(g) + 1)))
+            ends, starts = g["effective_end"].tolist()[:-1], g["effective_start"].tolist()[1:]
+            self.assertEqual(ends, starts)  # 上一版本的结束日 = 下一版本的开始日
+
+    def test_06_sql_window_median(self):
+        d = self.q("SELECT cohort, release_year, k_ratio FROM dwd_game_sample WHERE model_eligible = 1")
+        v = self.q("SELECT cohort, release_year, median_k FROM vw_finebi_k_median_by_year")
+        for r in v.itertuples():
+            py = float(np.median(d[(d["cohort"] == r.cohort) & (d["release_year"] == r.release_year)]["k_ratio"]))
+            self.assertAlmostEqual(r.median_k, round(py, 2), places=1)
+
+    def test_07_checkpoint_resume_equals_full_run(self):
+        tmp = pathlib.Path(tempfile.mkdtemp()) / "dw.db"
+        shutil.copy(DB_PATH, tmp)
+        conn = sqlite3.connect(str(tmp))
+        policy = etl_pipeline.load_policy()
+        with conn:
+            conn.execute("UPDATE etl_checkpoint SET status='COMPLETED' WHERE job_name='CLEAN_ODS_TO_DWD'")
+        with self.assertRaises(etl_pipeline.SimulatedCrash):
+            etl_pipeline.clean_ods_to_dwd(conn, policy, crash_after_batches=2)
+        status = conn.execute("SELECT status FROM etl_checkpoint WHERE job_name='CLEAN_ODS_TO_DWD'").fetchone()[0]
+        self.assertEqual(status, "INTERRUPTED")
+        etl_pipeline.clean_ods_to_dwd(conn, policy)
+        cols = "appid, cohort, cutoff_date, total_reviews, truth_value, model_eligible"
+        a = pd.read_sql_query(f"SELECT {cols} FROM dwd_game_sample ORDER BY appid, cohort, cutoff_date", conn)
+        b = self.q(f"SELECT {cols} FROM dwd_game_sample ORDER BY appid, cohort, cutoff_date")
+        conn.close()
+        pd.testing.assert_frame_equal(a.reset_index(drop=True), b.reset_index(drop=True))
+
+    def test_08_incremental_watermark(self):
+        wm = self.conn.execute("SELECT last_update_time FROM etl_checkpoint WHERE job_name='INCR_SNAPSHOT'").fetchone()
+        if wm is None:
+            self.skipTest("没有快照数据")
+        mx = self.conn.execute("SELECT MAX(fetched_at) FROM fact_snapshot").fetchone()[0]
+        self.assertEqual(wm[0], mx)
+        tmp = pathlib.Path(tempfile.mkdtemp()) / "dw.db"
+        shutil.copy(DB_PATH, tmp)
+        conn = sqlite3.connect(str(tmp))
+        before = conn.execute("SELECT COUNT(*) FROM fact_snapshot").fetchone()[0]
+        etl_pipeline.incremental_snapshot_load(conn)  # 原始文件没有新行时，再跑一次不该多出任何行
+        after = conn.execute("SELECT COUNT(*) FROM fact_snapshot").fetchone()[0]
+        conn.close()
+        raw_max = pd.read_csv(BASE_DIR / "data" / "raw" / "snapshots.csv")["fetched_at"].max()
+        if raw_max <= mx:
+            self.assertEqual(before, after)
+
+    def test_09_index_used_after_creation(self):
+        plan = self.conn.execute("EXPLAIN QUERY PLAN " + models.EXPLAIN_SQL).fetchall()
+        self.assertTrue(any("idx_fact_cohort_method" in str(r[-1]) for r in plan))
 
 
 if __name__ == "__main__":

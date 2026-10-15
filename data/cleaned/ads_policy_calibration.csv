@@ -1,0 +1,35 @@
+﻿calib_id,item,value,note
+35,transfer_r_loo_full,0.7506198985522645,直接迁移时政策系数 r 的全样本拟合值
+36,transfer_r_loo_min,0.7300868216220209,留一法各次拟合 r 的最小值
+37,transfer_r_loo_max,0.7646284429702327,留一法各次拟合 r 的最大值
+38,r_review_jump_inverse,0.28677946659019216,40 款老游戏评测量跳升倍数的倒数
+39,r_literature,0.5,Gamalytic: 2019 年后 k 减半
+40,recal_gamma0,-1.8017072832441663,M2 近年校准：截距（全样本拟合，仅供报告解读）
+41,recal_delta_after_share,-0.6871488141525951,M2 近年校准：政策后评测占比的系数，exp 后即 k 的倍数
+42,recal_gamma_log_price,-0.012954376121031055,M2 近年校准：ln 价格 的系数修正
+43,recal_gamma_positive_rate_c,0.2276914379682781,M2 近年校准：好评率 - 0.8 的系数修正
+44,recal_gamma_positive_rate_sq,-11.49819584919734,M2 近年校准：(好评率 - 0.8)² 的系数修正
+45,recal_gamma_log_reviews,0.10893672822273794,M2 近年校准：ln 评测数 的系数修正
+46,recal_gamma_log_age,-0.3139803683715965,M2 近年校准：ln 游戏年龄(年) 的系数修正
+47,recal_gamma_schinese_ratio,1.278903395471914,M2 近年校准：简中评测占比 的系数修正
+48,recal_gamma_steam_purchase_ratio,1.7589947257879297,M2 近年校准：Steam 内购买评测占比 的系数修正
+49,recal_gamma_log_playtime,-0.08610742631645807,M2 近年校准：ln 评测者时长中位数 的系数修正
+50,recal_gamma_is_indie,0.024232348589258445,M2 近年校准：是否独立游戏 的系数修正
+51,signalB_a,0.010331441994001506,ln(人均小时) = a + b·ln(评测者时长) 中的 a
+52,signalB_b,0.9496317371166216,同上的 b
+53,fusion_w0,0.07808590365094972,全样本融合权重（报告用）
+54,fusion_wA,0.4532031758949852,
+55,fusion_wB,0.5424127577687758,
+56,m2_cv_r2_2018,0.40464149098129043,2018 五折 ln k 的 R²
+57,m4_cv_r2_2018,0.44686049962392704,
+58,m3_interval_coverage_2018,0.7871866295264623,名义 80%
+59,m3_interval_coverage_truth,0.6261682242990654,名义 80%
+60,resid_corr_log_price,0.09793719427009229,直接迁移残差与 ln 价格 的 Spearman 相关，p=0.316
+61,resid_corr_positive_rate_c,-0.06351259014271456,直接迁移残差与 好评率 - 0.8 的 Spearman 相关，p=0.516
+62,resid_corr_positive_rate_sq,-0.0950386606469958,直接迁移残差与 (好评率 - 0.8)² 的 Spearman 相关，p=0.330
+63,resid_corr_log_reviews,0.23051602949016464,直接迁移残差与 ln 评测数 的 Spearman 相关，p=0.017
+64,resid_corr_log_age,-0.37247774651716253,直接迁移残差与 ln 游戏年龄(年) 的 Spearman 相关，p=0.000
+65,resid_corr_schinese_ratio,0.25122615590847763,直接迁移残差与 简中评测占比 的 Spearman 相关，p=0.009
+66,resid_corr_steam_purchase_ratio,0.313207334606179,直接迁移残差与 Steam 内购买评测占比 的 Spearman 相关，p=0.001
+67,resid_corr_log_playtime,0.10849189458745845,直接迁移残差与 ln 评测者时长中位数 的 Spearman 相关，p=0.266
+68,resid_corr_is_indie,0.00933335554828868,直接迁移残差与 是否独立游戏 的 Spearman 相关，p=0.924
