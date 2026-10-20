@@ -68,6 +68,12 @@ def build_row(appid, cutoff, policy):
     }
 
 
+def chosen_fusion_variant(conn):
+    """models.py 按事先定好的规则选定的融合方式；没跑过新版 models.py 时用旧做法。"""
+    r = conn.execute("SELECT value FROM ads_policy_calibration WHERE item = 'fusion_variant'").fetchone()
+    return list(models.FUSION_VARIANTS)[int(r[0])] if r else "old"
+
+
 def chosen_feature_set(conn):
     """models.py 按 2018 交叉验证选定的特征集（写在 ads_policy_calibration 里）；没跑过新版 models.py 时用 base。"""
     r = conn.execute("SELECT value FROM ads_policy_calibration WHERE item = 'feature_set_ext'").fetchone()
@@ -103,12 +109,12 @@ def fit_everything(conn, truth_cohorts=("truth", "truth_v2"), feature_set=None):
     off4 = tree.predict(X_te[:, 1:])
     w4 = models.fit_recal(Z, off4, y_lk)
     has_b = ((te["charts_coverage"] == 1) & te["playtime_review_median_hrs"].notna()).values
-    ln_a = np.log(te["total_reviews"].values) + off4 + Z @ w4
     pt = te["playtime_review_median_hrs"].clip(lower=0.1).values
-    ln_b = np.log(te["charts_total_hours"].values / np.exp(ab[0] + ab[1] * np.log(pt)))
-    F = np.column_stack([np.ones(has_b.sum()), ln_a[has_b], ln_b[has_b]])
-    wf, _, _, _ = np.linalg.lstsq(F, np.log(te["truth_value"].values[has_b]), rcond=None)
-    return dict(pt_fill=pt_fill, ols=ols, q=q, tree=tree, ab=ab, w2=w2, w4=w4, wf=wf,
+    ln_b = np.log(np.where(has_b, te["charts_total_hours"].fillna(1.0).values / np.exp(ab[0] + ab[1] * np.log(pt)), 1.0))
+    qa, qb = models.quality_design(te)
+    fusion = models.fusion_fit(Z, off4, y_lk, np.log(te["total_reviews"].values), ln_b, has_b, qa, qb,
+                               te["appid"].values, chosen_fusion_variant(conn))
+    return dict(pt_fill=pt_fill, ols=ols, q=q, tree=tree, ab=ab, w2=w2, w4=w4, fusion=fusion,
                 feature_set=feature_set, fills=fills)
 
 
@@ -123,13 +129,17 @@ def estimate(row_df, fit):
     out["M2"] = n * np.exp(X @ fit["ols"] + Z @ fit["w2"])
     out["M3_P10"] = out["M2"] * np.exp(X @ fit["q"][0.1] - X @ fit["q"][0.5])
     out["M3_P90"] = out["M2"] * np.exp(X @ fit["q"][0.9] - X @ fit["q"][0.5])
-    ln_a = np.log(n) + fit["tree"].predict(X[:, 1:]) + Z @ fit["w4"]
+    off4 = fit["tree"].predict(X[:, 1:])
+    ln_a = np.log(n) + off4 + Z @ fit["w4"]
     out["M4"] = np.exp(ln_a)
     pt = row_df["playtime_review_median_hrs"].clip(lower=0.1).values
     out["Signal_B"] = row_df["charts_total_hours"].values / np.exp(fit["ab"][0] + fit["ab"][1] * np.log(pt))
     has_b = row_df["charts_total_hours"].values > 0
-    fused = fit["wf"][0] + fit["wf"][1] * ln_a + fit["wf"][2] * np.log(np.where(has_b, out["Signal_B"], 1.0))
-    out["Fusion_AB"] = np.where(has_b, np.exp(fused), out["M4"])
+    qa, qb = models.quality_design(row_df)
+    fused, det = models.fusion_apply(fit["fusion"], Z, off4, np.log(n), np.log(np.where(has_b, out["Signal_B"], 1.0)),
+                                     has_b, qa, qb)
+    out["Fusion_AB"] = np.exp(fused)
+    out["Fusion_share_B"] = det["share_b"]
     out.loc[~has_b, "Signal_B"] = np.nan
     return out
 

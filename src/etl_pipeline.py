@@ -186,6 +186,13 @@ DDL = [
         feat_id INTEGER PRIMARY KEY AUTOINCREMENT, feature_code TEXT NOT NULL, feature_cn_name TEXT NOT NULL,
         m2_ols_coef REAL, m2_std_err REAL, m2_t_stat REAL, m2_p_value REAL, m4_rf_importance_pct REAL,
         m4_gbdt_importance_pct REAL)""",
+    # 2026-10-20 新增：融合用的信号维度表与"每款游戏 × 每路信号"的估算事实表（models.py 写入）
+    """CREATE TABLE IF NOT EXISTS dim_signal (
+        signal_code TEXT PRIMARY KEY, signal_name TEXT NOT NULL, signal_kind TEXT NOT NULL, quality_feature TEXT)""",
+    """CREATE TABLE IF NOT EXISTS fact_signal_estimate (
+        sample_id INTEGER NOT NULL, signal_code TEXT NOT NULL REFERENCES dim_signal(signal_code),
+        available INTEGER NOT NULL, ln_estimate REAL, sigma REAL, weight_share REAL NOT NULL,
+        PRIMARY KEY (sample_id, signal_code))""",
     """CREATE TABLE IF NOT EXISTS ads_policy_calibration (
         calib_id INTEGER PRIMARY KEY AUTOINCREMENT, item TEXT NOT NULL, value REAL, note TEXT)""",
 ]
@@ -357,7 +364,8 @@ def load_static_dims(conn, policy):
             (5, "M4", "M4 随机森林+梯度提升树", "评测", "Python", 1, "手写 CART 集成；近年校准同 M2"),
             (6, "Signal_B", "信号B 在线人数×时长", "在线", "Python", 0,
              "SteamCharts 累计游玩小时 ÷ 人均小时（人均小时用 2018 真值校准评测者时长）"),
-            (7, "Fusion_AB", "融合 A(M4)+B", "评测+在线", "Python", 1, "对数空间加权；校准与权重都用嵌套留一法"),
+            (7, "Fusion_AB", "融合 A(M4)+B", "评测+在线", "Python", 1,
+             "按各信号可信度（1/σ²）加权，σ 由各信号在其他真值上的误差拟合；融合方式见 ads_policy_calibration 的 fusion_variant，全部按游戏嵌套留一法"),
         ]
         conn.executemany("INSERT INTO dim_estimation_method VALUES (?, ?, ?, ?, ?, ?, ?)", methods)
     log_etl_job(conn, "STATIC_DIM_LOAD", t0, 0, len(GENRE_META), 0, "SUCCESS", "类型/年份/估算方法三张静态维度表")

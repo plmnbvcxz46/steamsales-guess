@@ -13,6 +13,7 @@
 8. 增量抽取：水位线等于已入库的最大时间，再跑一次不会重复装载
 9. 索引：建索引后执行计划改走索引
 10. 不泄露（按游戏留一法）：同一款游戏有多个里程碑时，改动这款游戏所有行的真值，它自己的估算不变
+11. 按可信度加权的融合：同样不泄露；只有 M4 可用时结果就是 M4；结果夹在 A 与（修正偏差后的）B 之间
 """
 import sys
 import shutil
@@ -199,6 +200,40 @@ class TestSteamSalesSystem(unittest.TestCase):
         y2[rows] += 5.0
         again = models.loo_recal(Z, off, y2, groups)
         np.testing.assert_allclose(base[rows], again[rows], atol=1e-9)
+
+
+    def test_11_precision_fusion(self):
+        df = self.q("SELECT * FROM dwd_game_sample ORDER BY sample_id")
+        tr = df[(df["cohort"] == "train_2018") & (df["model_eligible"] == 1)].reset_index(drop=True)
+        te = df[df["cohort"].isin(["truth", "truth_v2"]) & (df["model_eligible"] == 1)].reset_index(drop=True)
+        pt = float(tr["playtime_review_median_hrs"].median())
+        X_tr, _ = models.build_features(tr, pt)
+        X_te, _ = models.build_features(te, pt)
+        off = X_te @ models.fit_ols(X_tr, tr["log_k"].values)["beta"]
+        Z = models.recal_design(te, X_te)
+        y_lk = np.log(te["truth_value"].values / te["total_reviews"].values)
+        log_n = np.log(te["total_reviews"].values)
+        has_b = (te["charts_coverage"] == 1).values & te["playtime_review_median_hrs"].notna().values
+        ln_b = np.where(has_b, log_n + 4.0 + 0.3 * np.sin(np.arange(len(te))), 0.0)
+        qa, qb = models.quality_design(te)
+        groups = te["appid"].values
+        args = (Z, off, y_lk, log_n, ln_b, has_b, qa, qb, groups)
+        base, _ = models.logo_fusion(*args, "quality")
+        g = te["appid"].value_counts().index[0]
+        rows = np.where(groups == g)[0]
+        y2 = y_lk.copy()
+        y2[rows] += 5.0
+        again, _ = models.logo_fusion(Z, off, y2, log_n, ln_b, has_b, qa, qb, groups, "quality")
+        np.testing.assert_allclose(base[rows], again[rows], atol=1e-9)
+        # 没有信号 B 的行：结果等于（同一折校准的）M4；有 B 的行：夹在 A、B 之间
+        m4, _ = models.logo_fusion(*args, "m4")
+        np.testing.assert_allclose(base[~has_b], m4[~has_b], atol=1e-9)
+        # 夹在 A 与"修正平均偏差后的 B"之间（B 没在真值上校准过，融合时先加上它的平均偏差）
+        params = models.fusion_fit(*args, "quality")
+        fused, det = models.fusion_apply(params, Z, off, log_n, ln_b, has_b, qa, qb)
+        b_adj = ln_b + params["B"][0]
+        lo, hi = np.minimum(det["ln_a"], b_adj), np.maximum(det["ln_a"], b_adj)
+        self.assertTrue(np.all((fused[has_b] >= lo[has_b] - 1e-9) & (fused[has_b] <= hi[has_b] + 1e-9)))
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

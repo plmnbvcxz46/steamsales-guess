@@ -1,43 +1,43 @@
 ﻿price_scd_key,appid,name,base_price_usd,discount_percent,final_price_usd,effective_start,effective_end,is_current,version_no,observation_source,source_ref
-127,4000,Garry's Mod,9.99,75,2.49,2016-01-01,2017-01-03,0,1,wayback_archive,https://web.archive.org/web/20160101160632/https://store.steampowered.com/app/4000/
-128,4000,Garry's Mod,9.99,0,9.99,2017-01-03,2022-01-02,0,2,wayback_archive,https://web.archive.org/web/20170103163619/https://store.steampowered.com/app/4000/
-129,4000,Garry's Mod,9.99,33,6.69,2022-01-02,2023-01-14,0,3,wayback_archive,https://web.archive.org/web/20220102180454/https://store.steampowered.com/app/4000/
-130,4000,Garry's Mod,9.99,0,9.99,2023-01-14,2025-01-01,0,4,wayback_archive,https://web.archive.org/web/20230114114119/https://store.steampowered.com/app/4000/
-131,4000,Garry's Mod,9.99,50,4.99,2025-01-01,2026-10-15,0,5,wayback_archive,https://web.archive.org/web/20250101033026/https://store.steampowered.com/app/4000/
-132,4000,Garry's Mod,9.99,0,9.99,2026-10-15,9999-12-31,1,6,store_api,https://store.steampowered.com/api/appdetails?appids=4000&cc=us
-133,252490,Rust,34.99,0,34.99,2019-03-11,2023-01-28,0,1,wayback_archive,https://web.archive.org/web/20190311143345/https://store.steampowered.com/app/252490/
-134,252490,Rust,39.99,0,39.99,2023-01-28,2026-01-01,0,2,wayback_archive,https://web.archive.org/web/20230128162314/https://store.steampowered.com/app/252490/
-135,252490,Rust,39.99,50,19.99,2026-01-01,2026-10-15,0,3,wayback_archive,https://web.archive.org/web/20260101115226/https://store.steampowered.com/app/252490/
-136,252490,Rust,39.99,0,39.99,2026-10-15,9999-12-31,1,4,store_api,https://store.steampowered.com/api/appdetails?appids=252490&cc=us
-137,262060,Darkest Dungeon®,19.99,50,9.99,2016-01-01,2017-01-18,0,1,wayback_archive,https://web.archive.org/web/20160101113340/https://store.steampowered.com/app/262060/
-138,262060,Darkest Dungeon®,24.99,0,24.99,2017-01-18,2018-01-02,0,2,wayback_archive,https://web.archive.org/web/20170118040918/https://store.steampowered.com/app/262060/
-139,262060,Darkest Dungeon®,24.99,60,9.99,2018-01-02,2022-02-03,0,3,wayback_archive,https://web.archive.org/web/20180102065408/https://store.steampowered.com/app/262060/
-140,262060,Darkest Dungeon®,24.99,85,3.74,2022-02-03,9999-12-31,1,4,wayback_archive,https://web.archive.org/web/20220203030008/https://store.steampowered.com/app/262060/
-141,292030,The Witcher® 3: Wild Hunt,59.99,50,29.99,2016-01-01,2017-01-02,0,1,wayback_archive,https://web.archive.org/web/20160101154333/https://store.steampowered.com/app/292030/
-142,292030,The Witcher® 3: Wild Hunt,39.99,50,19.99,2017-01-02,2018-09-16,0,2,wayback_archive,https://web.archive.org/web/20170102030354/https://store.steampowered.com/app/292030/
-143,292030,The Witcher® 3: Wild Hunt,39.99,0,39.99,2018-09-16,2026-10-15,0,3,wayback_archive,https://web.archive.org/web/20180916153646/https://store.steampowered.com/app/292030/
-144,292030,The Witcher 3: Wild Hunt — Remastered,49.99,0,49.99,2026-10-15,9999-12-31,1,4,store_api,https://store.steampowered.com/api/appdetails?appids=292030&cc=us
-145,413150,Stardew Valley,14.99,33,9.99,2017-01-01,2023-01-06,0,1,wayback_archive,https://web.archive.org/web/20170101143418/https://store.steampowered.com/app/413150/
-146,413150,Stardew Valley,14.99,0,14.99,2023-01-06,9999-12-31,1,2,wayback_archive,https://web.archive.org/web/20230106140435/https://store.steampowered.com/app/413150/
-147,433340,Slime Rancher,19.99,0,19.99,2016-01-16,2017-01-02,0,1,wayback_archive,https://web.archive.org/web/20160116220739/https://store.steampowered.com/app/433340/
-148,433340,Slime Rancher,19.99,33,13.39,2017-01-02,2019-02-07,0,2,wayback_archive,https://web.archive.org/web/20170102030351/https://store.steampowered.com/app/433340/
-149,433340,Slime Rancher,19.99,50,9.99,2019-02-07,2021-02-03,0,3,wayback_archive,https://web.archive.org/web/20190207094543/https://store.steampowered.com/app/433340/
-150,433340,Slime Rancher,19.99,0,19.99,2021-02-03,2022-02-03,0,4,wayback_archive,https://web.archive.org/web/20210203175720/https://store.steampowered.com/app/433340/
-151,433340,Slime Rancher,19.99,70,5.99,2022-02-03,2023-02-06,0,5,wayback_archive,https://web.archive.org/web/20220203015252/https://store.steampowered.com/app/433340/
-152,433340,Slime Rancher,19.99,0,19.99,2023-02-06,9999-12-31,1,6,wayback_archive,https://web.archive.org/web/20230206213703/https://store.steampowered.com/app/433340/
-153,892970,Valheim,19.99,25,14.99,2022-01-05,2023-01-17,0,1,wayback_archive,https://web.archive.org/web/20220105044209/https://store.steampowered.com/app/892970/
-154,892970,Valheim,19.99,0,19.99,2023-01-17,2026-02-03,0,2,wayback_archive,https://web.archive.org/web/20230117115211/https://store.steampowered.com/app/892970/
-155,892970,Valheim,19.99,50,9.99,2026-02-03,2026-10-15,0,3,wayback_archive,https://web.archive.org/web/20260203143033/https://store.steampowered.com/app/892970/
-156,892970,Valheim,29.99,0,29.99,2026-10-15,9999-12-31,1,4,store_api,https://store.steampowered.com/api/appdetails?appids=892970&cc=us
-157,1113000,Persona 4 Golden,19.99,0,19.99,2020-08-07,9999-12-31,1,1,wayback_archive,https://web.archive.org/web/20200807012414/https://store.steampowered.com/app/1113000/
-158,1158310,Crusader Kings III,49.99,0,49.99,2024-01-06,2026-10-15,0,1,wayback_archive,https://web.archive.org/web/20240106213251/https://store.steampowered.com/app/1158310/
-159,1158310,Crusader Kings III,49.99,70,14.99,2026-10-15,9999-12-31,1,2,store_api,https://store.steampowered.com/api/appdetails?appids=1158310&cc=us
-160,1172620,Sea of Thieves 2023 Edition,39.99,0,39.99,2021-01-31,2024-01-06,0,1,wayback_archive,https://web.archive.org/web/20210131183904/https://store.steampowered.com/app/1172620/
-161,1172620,Sea of Thieves 2023 Edition,9.99,0,9.99,2024-01-06,2026-01-05,0,2,wayback_archive,https://web.archive.org/web/20240106165755/https://store.steampowered.com/app/1172620/
-162,1172620,Sea of Thieves 2023 Edition,39.99,65,13.99,2026-01-05,2026-10-15,0,3,wayback_archive,https://web.archive.org/web/20260105174036/https://store.steampowered.com/app/1172620/
-163,1172620,Sea of Thieves: 2026 Edition,39.99,0,39.99,2026-10-15,9999-12-31,1,4,store_api,https://store.steampowered.com/api/appdetails?appids=1172620&cc=us
-164,1326470,Sons Of The Forest,29.99,0,29.99,2024-01-05,9999-12-31,1,1,wayback_archive,https://web.archive.org/web/20240105035415/https://store.steampowered.com/app/1326470/
-165,1621690,Core Keeper,12.99,20,10.39,2023-02-16,2024-03-05,0,1,wayback_archive,https://web.archive.org/web/20230216171106/https://store.steampowered.com/app/1621690/
-166,1621690,Core Keeper,15.99,0,15.99,2024-03-05,2025-01-22,0,2,wayback_archive,https://web.archive.org/web/20240305084844/https://store.steampowered.com/app/1621690/
-167,1621690,Core Keeper,19.99,0,19.99,2025-01-22,2026-10-15,0,3,wayback_archive,https://web.archive.org/web/20250122123631/https://store.steampowered.com/app/1621690/
-168,1621690,Core Keeper,19.99,40,11.99,2026-10-15,9999-12-31,1,4,store_api,https://store.steampowered.com/api/appdetails?appids=1621690&cc=us
+169,4000,Garry's Mod,9.99,75,2.49,2016-01-01,2017-01-03,0,1,wayback_archive,https://web.archive.org/web/20160101160632/https://store.steampowered.com/app/4000/
+170,4000,Garry's Mod,9.99,0,9.99,2017-01-03,2022-01-02,0,2,wayback_archive,https://web.archive.org/web/20170103163619/https://store.steampowered.com/app/4000/
+171,4000,Garry's Mod,9.99,33,6.69,2022-01-02,2023-01-14,0,3,wayback_archive,https://web.archive.org/web/20220102180454/https://store.steampowered.com/app/4000/
+172,4000,Garry's Mod,9.99,0,9.99,2023-01-14,2025-01-01,0,4,wayback_archive,https://web.archive.org/web/20230114114119/https://store.steampowered.com/app/4000/
+173,4000,Garry's Mod,9.99,50,4.99,2025-01-01,2026-10-15,0,5,wayback_archive,https://web.archive.org/web/20250101033026/https://store.steampowered.com/app/4000/
+174,4000,Garry's Mod,9.99,0,9.99,2026-10-15,9999-12-31,1,6,store_api,https://store.steampowered.com/api/appdetails?appids=4000&cc=us
+175,252490,Rust,34.99,0,34.99,2019-03-11,2023-01-28,0,1,wayback_archive,https://web.archive.org/web/20190311143345/https://store.steampowered.com/app/252490/
+176,252490,Rust,39.99,0,39.99,2023-01-28,2026-01-01,0,2,wayback_archive,https://web.archive.org/web/20230128162314/https://store.steampowered.com/app/252490/
+177,252490,Rust,39.99,50,19.99,2026-01-01,2026-10-15,0,3,wayback_archive,https://web.archive.org/web/20260101115226/https://store.steampowered.com/app/252490/
+178,252490,Rust,39.99,0,39.99,2026-10-15,9999-12-31,1,4,store_api,https://store.steampowered.com/api/appdetails?appids=252490&cc=us
+179,262060,Darkest Dungeon®,19.99,50,9.99,2016-01-01,2017-01-18,0,1,wayback_archive,https://web.archive.org/web/20160101113340/https://store.steampowered.com/app/262060/
+180,262060,Darkest Dungeon®,24.99,0,24.99,2017-01-18,2018-01-02,0,2,wayback_archive,https://web.archive.org/web/20170118040918/https://store.steampowered.com/app/262060/
+181,262060,Darkest Dungeon®,24.99,60,9.99,2018-01-02,2022-02-03,0,3,wayback_archive,https://web.archive.org/web/20180102065408/https://store.steampowered.com/app/262060/
+182,262060,Darkest Dungeon®,24.99,85,3.74,2022-02-03,9999-12-31,1,4,wayback_archive,https://web.archive.org/web/20220203030008/https://store.steampowered.com/app/262060/
+183,292030,The Witcher® 3: Wild Hunt,59.99,50,29.99,2016-01-01,2017-01-02,0,1,wayback_archive,https://web.archive.org/web/20160101154333/https://store.steampowered.com/app/292030/
+184,292030,The Witcher® 3: Wild Hunt,39.99,50,19.99,2017-01-02,2018-09-16,0,2,wayback_archive,https://web.archive.org/web/20170102030354/https://store.steampowered.com/app/292030/
+185,292030,The Witcher® 3: Wild Hunt,39.99,0,39.99,2018-09-16,2026-10-15,0,3,wayback_archive,https://web.archive.org/web/20180916153646/https://store.steampowered.com/app/292030/
+186,292030,The Witcher 3: Wild Hunt — Remastered,49.99,0,49.99,2026-10-15,9999-12-31,1,4,store_api,https://store.steampowered.com/api/appdetails?appids=292030&cc=us
+187,413150,Stardew Valley,14.99,33,9.99,2017-01-01,2023-01-06,0,1,wayback_archive,https://web.archive.org/web/20170101143418/https://store.steampowered.com/app/413150/
+188,413150,Stardew Valley,14.99,0,14.99,2023-01-06,9999-12-31,1,2,wayback_archive,https://web.archive.org/web/20230106140435/https://store.steampowered.com/app/413150/
+189,433340,Slime Rancher,19.99,0,19.99,2016-01-16,2017-01-02,0,1,wayback_archive,https://web.archive.org/web/20160116220739/https://store.steampowered.com/app/433340/
+190,433340,Slime Rancher,19.99,33,13.39,2017-01-02,2019-02-07,0,2,wayback_archive,https://web.archive.org/web/20170102030351/https://store.steampowered.com/app/433340/
+191,433340,Slime Rancher,19.99,50,9.99,2019-02-07,2021-02-03,0,3,wayback_archive,https://web.archive.org/web/20190207094543/https://store.steampowered.com/app/433340/
+192,433340,Slime Rancher,19.99,0,19.99,2021-02-03,2022-02-03,0,4,wayback_archive,https://web.archive.org/web/20210203175720/https://store.steampowered.com/app/433340/
+193,433340,Slime Rancher,19.99,70,5.99,2022-02-03,2023-02-06,0,5,wayback_archive,https://web.archive.org/web/20220203015252/https://store.steampowered.com/app/433340/
+194,433340,Slime Rancher,19.99,0,19.99,2023-02-06,9999-12-31,1,6,wayback_archive,https://web.archive.org/web/20230206213703/https://store.steampowered.com/app/433340/
+195,892970,Valheim,19.99,25,14.99,2022-01-05,2023-01-17,0,1,wayback_archive,https://web.archive.org/web/20220105044209/https://store.steampowered.com/app/892970/
+196,892970,Valheim,19.99,0,19.99,2023-01-17,2026-02-03,0,2,wayback_archive,https://web.archive.org/web/20230117115211/https://store.steampowered.com/app/892970/
+197,892970,Valheim,19.99,50,9.99,2026-02-03,2026-10-15,0,3,wayback_archive,https://web.archive.org/web/20260203143033/https://store.steampowered.com/app/892970/
+198,892970,Valheim,29.99,0,29.99,2026-10-15,9999-12-31,1,4,store_api,https://store.steampowered.com/api/appdetails?appids=892970&cc=us
+199,1113000,Persona 4 Golden,19.99,0,19.99,2020-08-07,9999-12-31,1,1,wayback_archive,https://web.archive.org/web/20200807012414/https://store.steampowered.com/app/1113000/
+200,1158310,Crusader Kings III,49.99,0,49.99,2024-01-06,2026-10-15,0,1,wayback_archive,https://web.archive.org/web/20240106213251/https://store.steampowered.com/app/1158310/
+201,1158310,Crusader Kings III,49.99,70,14.99,2026-10-15,9999-12-31,1,2,store_api,https://store.steampowered.com/api/appdetails?appids=1158310&cc=us
+202,1172620,Sea of Thieves 2023 Edition,39.99,0,39.99,2021-01-31,2024-01-06,0,1,wayback_archive,https://web.archive.org/web/20210131183904/https://store.steampowered.com/app/1172620/
+203,1172620,Sea of Thieves 2023 Edition,9.99,0,9.99,2024-01-06,2026-01-05,0,2,wayback_archive,https://web.archive.org/web/20240106165755/https://store.steampowered.com/app/1172620/
+204,1172620,Sea of Thieves 2023 Edition,39.99,65,13.99,2026-01-05,2026-10-15,0,3,wayback_archive,https://web.archive.org/web/20260105174036/https://store.steampowered.com/app/1172620/
+205,1172620,Sea of Thieves: 2026 Edition,39.99,0,39.99,2026-10-15,9999-12-31,1,4,store_api,https://store.steampowered.com/api/appdetails?appids=1172620&cc=us
+206,1326470,Sons Of The Forest,29.99,0,29.99,2024-01-05,9999-12-31,1,1,wayback_archive,https://web.archive.org/web/20240105035415/https://store.steampowered.com/app/1326470/
+207,1621690,Core Keeper,12.99,20,10.39,2023-02-16,2024-03-05,0,1,wayback_archive,https://web.archive.org/web/20230216171106/https://store.steampowered.com/app/1621690/
+208,1621690,Core Keeper,15.99,0,15.99,2024-03-05,2025-01-22,0,2,wayback_archive,https://web.archive.org/web/20240305084844/https://store.steampowered.com/app/1621690/
+209,1621690,Core Keeper,19.99,0,19.99,2025-01-22,2026-10-15,0,3,wayback_archive,https://web.archive.org/web/20250122123631/https://store.steampowered.com/app/1621690/
+210,1621690,Core Keeper,19.99,40,11.99,2026-10-15,9999-12-31,1,4,store_api,https://store.steampowered.com/api/appdetails?appids=1621690&cc=us

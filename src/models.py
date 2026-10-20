@@ -396,6 +396,117 @@ def nested_loo_fusion(Z, off_a, y_lk, log_n, log_b, has_b, groups=None):
 
 
 # ==============================================================================
+# 五点五、按可信度加权的融合（2026-10-20）
+#   每路信号对每款游戏给出：ln 估算值 + 这次大概会错多少（σ）。σ 由这路信号在其他真值游戏上的
+#   "诚实"误差（本身也是留一法算的）拟合，随少数几个事先看得到的质量指标变化。
+#   融合 = 按 1/σ² 对"可用的信号"加权平均：
+#     - 哪路信号算不出来就不参与，只剩 M4 时结果就是 M4；
+#     - 结果永远夹在可用信号之间；
+#     - 以后加新信号，只要给出"估算值 + 质量指标"，融合公式不用改。
+#   旧做法是 ln Y = v0 + vA ln Y_A + vB ln Y_B 的固定权重，一路离谱时会把另一路一起拖偏。
+# ==============================================================================
+SIGNALS = [
+    # (代码, 名称, 类型, 质量指标说明)
+    ("A", "M4 评测数推算（近年校准后）", "estimate", "ln 评测数：评测越多越准"),
+    ("B", "信号 B 在线人数 × 时长", "estimate", "ln 上架月数：SteamCharts 记录的月份越多越准"),
+]
+FUSION_VARIANTS = {
+    "m4": "只用 M4（不融合）",
+    "old": "旧：固定权重回归 ln Y = v0 + vA ln A + vB ln B",
+    "geo": "A、B 各占一半（几何平均）",
+    "const": "按可信度加权，σ 为常数（每路信号一个平均误差）",
+    "quality": "按可信度加权，σ 随质量指标变化",
+}
+
+
+def quality_design(df):
+    """各信号的质量指标设计矩阵（含常数列）。只用截止日当时就能看到的量。"""
+    n = len(df)
+    qa = np.column_stack([np.ones(n), np.log(df["total_reviews"].values.astype(float))])
+    months = np.clip(df["game_age_years"].values.astype(float) * 12.0, 1.0, None)
+    qb = np.column_stack([np.ones(n), np.log(months)])
+    return qa, qb
+
+
+def fit_error_model(resid, Q):
+    """
+    误差模型：resid = ln(真值/估算)。返回 (mu, gamma)：mu 是这路信号的平均偏差，
+    ln σ² = Q @ gamma，用 ln((resid - mu)² + 0.01) 对 Q 回归（加 0.01 防止残差恰好为 0 时取对数爆掉）。
+    对数残差平方的期望比 ln σ² 低一个常数，但各路信号低的是同一个常数，算权重时会约掉。
+    """
+    mu = float(np.mean(resid))
+    gamma, _, _, _ = np.linalg.lstsq(Q, np.log((resid - mu) ** 2 + 0.01), rcond=None)
+    return mu, gamma
+
+
+def fusion_fit(Z, off_a, y_lk, log_n, ln_b, has_b, qa, qb, groups, variant):
+    """用给定的真值行拟合融合需要的全部参数：M4 的近年校准 + 各信号的误差模型（或旧做法的回归权重）。"""
+    params = {"variant": variant, "w_recal": fit_recal(Z, off_a, y_lk)}
+    if variant in ("m4", "geo"):
+        return params
+    y_log = y_lk + log_n
+    if variant == "old":
+        ln_a_in = log_n + off_a + Z @ params["w_recal"]
+        F = np.column_stack([np.ones(has_b.sum()), ln_a_in[has_b], ln_b[has_b]])
+        params["v"], _, _, _ = np.linalg.lstsq(F, y_log[has_b], rcond=None)
+        return params
+    # M4 在这批行上的"诚实"估算：按游戏留一法，避免用自己的真值校准自己，让 M4 看起来比实际更准
+    ln_a_honest = log_n + loo_recal(Z, off_a, y_lk, groups)
+    cols = slice(None) if variant == "quality" else slice(0, 1)
+    params["cols"] = cols
+    params["A"] = fit_error_model(y_log - ln_a_honest, qa[:, cols])
+    params["B"] = fit_error_model((y_log - ln_b)[has_b], qb[has_b][:, cols])
+    return params
+
+
+def fusion_apply(params, Z, off_a, log_n, ln_b, has_b, qa, qb):
+    """返回 (ln 估算, 明细)。明细里有每路信号的 σ 和信号 B 的权重占比，写进 fact_signal_estimate。"""
+    ln_a = log_n + off_a + Z @ params["w_recal"]
+    n = len(ln_a)
+    det = {"ln_a": ln_a, "sigma_a": np.full(n, np.nan), "sigma_b": np.full(n, np.nan),
+           "share_b": np.where(has_b, 0.5, 0.0)}
+    v = params["variant"]
+    if v == "m4":
+        det["share_b"] = np.zeros(n)
+        return ln_a, det
+    if v == "geo":
+        return np.where(has_b, 0.5 * ln_a + 0.5 * ln_b, ln_a), det
+    if v == "old":
+        c = params["v"]
+        return np.where(has_b, c[0] + c[1] * ln_a + c[2] * ln_b, ln_a), det
+    cols = params["cols"]
+    (mu_a, g_a), (mu_b, g_b) = params["A"], params["B"]
+    var_a, var_b = np.exp(qa[:, cols] @ g_a), np.exp(qb[:, cols] @ g_b)
+    w_a, w_b = 1.0 / var_a, np.where(has_b, 1.0 / var_b, 0.0)
+    # A 已经过近年校准（截距就是它的偏差修正），不再加 mu_a，这样只剩 A 时结果严格等于 M4；
+    # B 没在真值上校准过，加上它的平均偏差 mu_b
+    fused = (w_a * ln_a + w_b * (ln_b + mu_b)) / (w_a + w_b)
+    det.update(sigma_a=np.sqrt(var_a), sigma_b=np.where(has_b, np.sqrt(var_b), np.nan), share_b=w_b / (w_a + w_b))
+    return fused, det
+
+
+def fusion_predict(train, test, Z, off_a, y_lk, log_n, ln_b, has_b, qa, qb, groups, variant):
+    """用 train 行拟合、估 test 行（两者是布尔掩码）。"""
+    p = fusion_fit(Z[train], off_a[train], y_lk[train], log_n[train], ln_b[train], has_b[train],
+                   qa[train], qb[train], groups[train], variant)
+    return fusion_apply(p, Z[test], off_a[test], log_n[test], ln_b[test], has_b[test], qa[test], qb[test])
+
+
+def logo_fusion(Z, off_a, y_lk, log_n, ln_b, has_b, qa, qb, groups, variant):
+    """按游戏留一法：估第 g 款游戏时，融合需要的所有参数都只用其余游戏拟合（嵌套：误差模型用的残差本身也是留一法的）。"""
+    n = len(y_lk)
+    out = np.zeros(n)
+    det = {k: np.full(n, np.nan) for k in ("sigma_a", "sigma_b", "share_b")}
+    for g in np.unique(groups):
+        test = groups == g
+        ln, d = fusion_predict(~test, test, Z, off_a, y_lk, log_n, ln_b, has_b, qa, qb, groups, variant)
+        out[test] = ln
+        for k in det:
+            det[k][test] = d[k]
+    return out, det
+
+
+# ==============================================================================
 # 六、主流程
 # ==============================================================================
 def m1_k(year):
@@ -521,16 +632,13 @@ def run_all_models():
 
     # ---------------- 融合（嵌套留一法） ----------------
     log_b = np.log(np.where(has_b_te, y_b_te, 1.0))
-    fused_log, w_list = nested_loo_fusion(Z, np.log(k_pre["M4"]), y_lk_te, log_n_te, log_b, has_b_te, groups_te)
-    est_te["Fusion_AB"] = np.exp(fused_log)
     w_m4_full = fit_recal(Z, np.log(k_pre["M4"]), y_lk_te)
     ln_a_full = log_n_te + np.log(k_pre["M4"]) + Z @ w_m4_full
     Ff = np.column_stack([np.ones(has_b_te.sum()), ln_a_full[has_b_te], log_b[has_b_te]])
     w_full, _, _, _ = np.linalg.lstsq(Ff, np.log(y_true_te[has_b_te]), rcond=None)
     print(f"[直接迁移] 政策系数 r：留一法全样本 {r_full:.3f}，评测量跳升倒数 {r_scan:.3f}，文献 0.5", flush=True)
     print(f"[近年校准] M2 校准中政策后评测占比的系数 δ={w_recal_full[1]:.3f}（相当于 k × {math.exp(w_recal_full[1]):.3f}）", flush=True)
-    print(f"[融合] 全样本权重 ln Y = {w_full[0]:.3f} + {w_full[1]:.3f} ln Y_A + {w_full[2]:.3f} ln Y_B "
-          f"（评估用的是嵌套留一法）", flush=True)
+    print(f"[融合·旧做法] 全样本权重 ln Y = {w_full[0]:.3f} + {w_full[1]:.3f} ln Y_A + {w_full[2]:.3f} ln Y_B", flush=True)
 
     # ---------------- 外部检验：只用旧真值校准，估新真值集（两批游戏没有重复，不需要留一法） ----------------
     ext_val = {}
@@ -557,6 +665,28 @@ def run_all_models():
         le = np.log(e["Fusion_AB"][new] / y_true_te[new])
         print(f"[外部检验 {fs}] 新真值集 {new.sum()} 条：融合 ±30% 命中 {100 * np.mean(np.abs(np.exp(le) - 1) <= 0.3):.1f}%，"
               f"中位 |ln 误差| {np.median(np.abs(le)):.3f}", flush=True)
+
+    # ---------------- 融合方式：五种做法对比，按事先定好的规则选一种 ----------------
+    # 规则（2026-10-20 定，先定规则再看结果）：在外部检验（旧真值拟合 -> 估新真值集）上比平均 |ln 误差|，
+    # 取最小的；如果最好的那种还不如只用 M4，就只用 M4。再用新旧合并的按游戏留一法报告选中方案的成绩。
+    off_a = np.log(k_pre["M4"])
+    qa_te, qb_te = quality_design(te)
+    fus_args = (Z, off_a, y_lk_te, log_n_te, log_b, has_b_te, qa_te, qb_te, groups_te)
+    fus_ext, fus_logo, fus_det = {}, {}, {}
+    for v in FUSION_VARIANTS:
+        ln_new, _ = fusion_predict(old, new, *fus_args, v)
+        fus_ext[v] = float(np.mean(np.abs(ln_new - np.log(y_true_te[new]))))
+        fus_logo[v], fus_det[v] = logo_fusion(*fus_args, v)
+    fusion_variant = min(["old", "geo", "const", "quality"], key=lambda v: fus_ext[v])
+    if fus_ext[fusion_variant] >= fus_ext["m4"]:
+        fusion_variant = "m4"
+    for v, name in FUSION_VARIANTS.items():
+        le = fus_logo[v] - np.log(y_true_te)
+        print(f"[融合方式] {name}：外部检验平均 |ln 误差| {fus_ext[v]:.3f}；合并真值留一法 {np.mean(np.abs(le)):.3f}，"
+              f"±30% 命中 {100 * np.mean(np.abs(np.exp(le) - 1) <= 0.3):.1f}%" + ("  <- 选用" if v == fusion_variant else ""),
+              flush=True)
+    est_te["Fusion_AB"] = np.exp(fus_logo[fusion_variant])
+    fus_full = fusion_fit(*fus_args, fusion_variant)
 
     # ---------------- 写事实表 ----------------
     game_key = dict(conn.execute("SELECT appid, game_key FROM dim_game").fetchall())
@@ -622,6 +752,25 @@ def run_all_models():
                within_30pct_flag, within_50pct_flag) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             fact_rows)
 
+    # ---------------- 各路信号的估算与权重（融合是怎么做决定的） ----------------
+    d = fus_det[fusion_variant]
+    sig_rows = []
+    for i, row in te.iterrows():
+        sid = int(row["sample_id"])
+        share_b = float(d["share_b"][i]) if not np.isnan(d["share_b"][i]) else 0.0
+        sig_rows.append((sid, "A", 1, round(float(np.log(est_te["M4"][i])), 6),
+                         None if np.isnan(d["sigma_a"][i]) else round(float(d["sigma_a"][i]), 4), round(1 - share_b, 4)))
+        sig_rows.append((sid, "B", int(has_b_te[i]), round(float(log_b[i]), 6) if has_b_te[i] else None,
+                         None if np.isnan(d["sigma_b"][i]) else round(float(d["sigma_b"][i]), 4),
+                         round(share_b, 4) if has_b_te[i] else 0.0))
+    with conn:
+        conn.execute("DELETE FROM fact_signal_estimate;")
+        conn.execute("DELETE FROM dim_signal;")
+        conn.executemany("INSERT INTO dim_signal (signal_code, signal_name, signal_kind, quality_feature) VALUES (?, ?, ?, ?)",
+                         SIGNALS)
+        conn.executemany("""INSERT INTO fact_signal_estimate (sample_id, signal_code, available, ln_estimate, sigma,
+                            weight_share) VALUES (?, ?, ?, ?, ?, ?)""", sig_rows)
+
     # ---------------- 评估汇总 ----------------
     method_name = dict(conn.execute("SELECT method_code, method_name FROM dim_estimation_method").fetchall())
     fact = pd.read_sql_query("SELECT * FROM fact_sales_estimation", conn)
@@ -661,6 +810,12 @@ def run_all_models():
         s = sub[sub["method_code"] == code]
         add_eval("合并真值集 信号B可用子集", code, method_name[code], s["true_value"].values, s["estimated_sales"].values,
                  "同一批游戏上比较 A / B / 融合")
+
+    # 融合方式对比（外部检验 + 合并真值按游戏留一法）；平均 |ln 误差| 写在备注里，命中率等照常
+    for v, name in FUSION_VARIANTS.items():
+        le = fus_logo[v] - np.log(y_true_te)
+        add_eval("融合方式对比（合并真值，按游戏留一法）", "F_" + v, name, y_true_te, np.exp(fus_logo[v]),
+                 f"平均 |ln 误差| {np.mean(np.abs(le)):.3f}；外部检验 {fus_ext[v]:.3f}" + ("；选用" if v == fusion_variant else ""))
 
     # 外部检验：只用旧真值校准，估新真值集（base 与 ext 两套特征都报）
     for fs, e in ext_val.items():
@@ -713,6 +868,9 @@ def run_all_models():
     resid_te = np.log(y_true_te / transfer["M2_r_loo"])  # 检验的是"直接迁移"的残差
     calib_rows = [
         ("feature_set_ext", 1.0 if feature_set == "ext" else 0.0, "1 = 选用 ext 特征集（按 2018 五折 M4 的 R² 选）"),
+        ("fusion_variant", float(list(FUSION_VARIANTS).index(fusion_variant)),
+         "融合方式编号：" + "，".join(f"{i}={k}" for i, k in enumerate(FUSION_VARIANTS)) + f"；选用 {fusion_variant}"),
+    ] + [(f"fusion_ext_mean_abs_ln_{v}", fus_ext[v], f"外部检验平均 |ln 误差|：{FUSION_VARIANTS[v]}") for v in FUSION_VARIANTS] + [
         ("cv_r2_m2_base", cv["base"][0], "2018 五折 ln k 的 R²，base 特征集"),
         ("cv_r2_m4_base", cv["base"][1], ""),
         ("cv_r2_m2_ext", cv["ext"][0], "2018 五折 ln k 的 R²，ext 特征集"),
@@ -738,6 +896,13 @@ def run_all_models():
         ("m3_interval_coverage_2018", float(np.mean((y_tr >= oof["M3_lo"]) & (y_tr <= oof["M3_hi"]))), "名义 80%"),
         ("m3_interval_coverage_truth", float(np.mean((y_true_te >= est_te["M3_lo"]) & (y_true_te <= est_te["M3_hi"]))), "名义 80%"),
     ]
+    if fusion_variant in ("const", "quality"):
+        for sig in ("A", "B"):
+            mu, g = fus_full[sig]
+            calib_rows.append((f"fusion_{sig}_bias", mu, f"信号 {sig} 的平均偏差 ln(真值/估算)（全样本拟合，报告用）"))
+            for j, gj in enumerate(g):
+                calib_rows.append((f"fusion_{sig}_lnvar_coef{j}", float(gj),
+                                   f"信号 {sig} 的 ln σ² 系数（0 = 常数项，1 = 质量指标；全样本拟合，报告用）"))
     for j, (code, cn) in enumerate(feat_names[1:10], start=1):
         x = X_te[:, j]
         if np.std(x) > 0:

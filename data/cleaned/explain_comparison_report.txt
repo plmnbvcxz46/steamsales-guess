@@ -6,12 +6,12 @@
     SEARCH dge USING INTEGER PRIMARY KEY (rowid=?)
     SEARCH dm USING INTEGER PRIMARY KEY (rowid=?)
     USE TEMP B-TREE FOR GROUP BY
-    耗时 549.1 ms
+    耗时 463.2 ms
 建索引后执行计划:
     SEARCH f USING INDEX idx_fact_cohort_method (cohort=? AND method_code=?)
     SEARCH dg USING INTEGER PRIMARY KEY (rowid=?)
     SEARCH dge USING INTEGER PRIMARY KEY (rowid=?)
     SEARCH dm USING INTEGER PRIMARY KEY (rowid=?)
     USE TEMP B-TREE FOR GROUP BY
-    耗时 295.6 ms
-提速倍数: 1.86x
+    耗时 295.3 ms
+提速倍数: 1.57x

@@ -13,6 +13,7 @@ DROP TABLE IF EXISTS fact_sales_estimation, fact_snapshot, dwd_game_sample, dim_
     ods_ars_players_2018, ods_steam_appdetails, ods_steam_reviews_at_cutoff, ods_steamcharts_monthly,
     ods_recent_sales_truth, ods_price_history_wayback, ods_review_monthly_policy_scan,
     ods_official_sales_truth_v2, ods_review_language_counts, ods_itad_price_history, ods_itad_bundles,
+    dim_signal, fact_signal_estimate,
     stg_kettle_train_clean, dim_price_scd2_kettle;
 SET FOREIGN_KEY_CHECKS = 1;
 
@@ -220,6 +221,20 @@ CREATE TABLE ads_feature_importance (
     m2_ols_coef DECIMAL(14,5), m2_std_err DECIMAL(14,5), m2_t_stat DECIMAL(12,3), m2_p_value DOUBLE,
     m4_rf_importance_pct DECIMAL(8,2), m4_gbdt_importance_pct DECIMAL(8,2)
 ) ENGINE=InnoDB COMMENT='结果：回归系数与树模型特征重要性';
+
+CREATE TABLE dim_signal (
+    signal_code VARCHAR(10) PRIMARY KEY, signal_name VARCHAR(100) NOT NULL,
+    signal_kind VARCHAR(20) NOT NULL COMMENT 'estimate = 估算值 / lower_bound = 下限 / upper_bound = 上限',
+    quality_feature VARCHAR(200) COMMENT '决定这路信号可信度的质量指标'
+) ENGINE=InnoDB COMMENT='维度：参与融合的信号（以后加新信号只需在这里登记）';
+
+CREATE TABLE fact_signal_estimate (
+    sample_id INT NOT NULL, signal_code VARCHAR(10) NOT NULL, available TINYINT NOT NULL,
+    ln_estimate DOUBLE, sigma DOUBLE COMMENT '这路信号在这款游戏上的预计误差（ln 尺度）',
+    weight_share DOUBLE NOT NULL COMMENT '这路信号在融合里的权重占比',
+    PRIMARY KEY (sample_id, signal_code),
+    CONSTRAINT fk_sig_signal FOREIGN KEY (signal_code) REFERENCES dim_signal(signal_code)
+) ENGINE=InnoDB COMMENT='结果层：每款真值游戏 × 每路信号的估算与权重（融合怎么做的决定）';
 
 CREATE TABLE ads_policy_calibration (
     calib_id INT AUTO_INCREMENT PRIMARY KEY, item VARCHAR(60) NOT NULL, value DOUBLE, note VARCHAR(500)

@@ -22,6 +22,7 @@ TABLES = [
     "dim_genre", "dim_release_date", "dim_estimation_method", "dim_game", "dim_price_scd2",
     "dwd_game_sample", "fact_sales_estimation", "fact_snapshot",
     "ads_review_monthly_index", "ads_model_eval_summary", "ads_feature_importance", "ads_policy_calibration",
+    "dim_signal", "fact_signal_estimate",
 ]
 BATCH = 500
 
