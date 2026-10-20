@@ -12,6 +12,7 @@
 7. 断点续传：中途中断再续跑，结果与一次跑完完全相同
 8. 增量抽取：水位线等于已入库的最大时间，再跑一次不会重复装载
 9. 索引：建索引后执行计划改走索引
+10. 不泄露（按游戏留一法）：同一款游戏有多个里程碑时，改动这款游戏所有行的真值，它自己的估算不变
 """
 import sys
 import shutil
@@ -47,7 +48,8 @@ class TestSteamSalesSystem(unittest.TestCase):
         n_ars = self.conn.execute("SELECT COUNT(*) FROM ods_ars_players_2018").fetchone()[0]
         self.assertEqual(n_ars, 13281)  # 原始 CSV 的全部行（含 6 组重复）原样入原始层
         n_tr = self.conn.execute("SELECT COUNT(*) FROM dwd_game_sample WHERE cohort='train_2018' AND model_eligible=1").fetchone()[0]
-        n_te = self.conn.execute("SELECT COUNT(*) FROM dwd_game_sample WHERE cohort='truth'").fetchone()[0]
+        n_te = self.conn.execute("SELECT COUNT(*) FROM dwd_game_sample WHERE cohort='truth' AND model_eligible=1").fetchone()[0]
+        n_v2 = self.conn.execute("SELECT COUNT(*) FROM dwd_game_sample WHERE cohort='truth_v2' AND model_eligible=1").fetchone()[0]
         self.assertGreater(n_tr, 300)
         self.assertGreater(n_te, 50)
         f = self.q("SELECT cohort, method_code, COUNT(*) n FROM fact_sales_estimation GROUP BY 1, 2")
@@ -56,6 +58,7 @@ class TestSteamSalesSystem(unittest.TestCase):
             self.assertEqual(cnt[("train_2018", m)], n_tr)
         for m in ["M0", "M1", "M2", "M3", "M4", "Fusion_AB"]:
             self.assertEqual(cnt[("truth", m)], n_te)
+            self.assertEqual(cnt.get(("truth_v2", m), 0), n_v2)
 
     def test_02_cleaning_rules(self):
         bad = self.conn.execute(
@@ -113,6 +116,10 @@ class TestSteamSalesSystem(unittest.TestCase):
         df2["log_k"] = np.log(df2["k_ratio"])
         X2, _ = models.build_features(df2, 10.0)
         self.assertTrue(np.array_equal(X1, X2))
+        # ext 特征集（语言占比、价格历史等）同样与真值无关
+        E1, _ = models.build_features(df, 10.0, "ext", models.fit_fills(df))
+        E2, _ = models.build_features(df2, 10.0, "ext", models.fit_fills(df2))
+        self.assertTrue(np.allclose(E1, E2, equal_nan=True))
 
     def test_05_scd2_integrity(self):
         p = self.q("SELECT * FROM dim_price_scd2 ORDER BY appid, version_no")
@@ -171,6 +178,27 @@ class TestSteamSalesSystem(unittest.TestCase):
         plan = self.conn.execute("EXPLAIN QUERY PLAN " + models.EXPLAIN_SQL).fetchall()
         self.assertTrue(any("idx_fact_cohort_method" in str(r[-1]) for r in plan))
 
+
+
+    def test_10_no_leakage_leave_one_game_out(self):
+        df = self.q("SELECT * FROM dwd_game_sample ORDER BY sample_id")
+        tr = df[(df["cohort"] == "train_2018") & (df["model_eligible"] == 1)].reset_index(drop=True)
+        te = df[df["cohort"].isin(["truth", "truth_v2"]) & (df["model_eligible"] == 1)].reset_index(drop=True)
+        pt = float(tr["playtime_review_median_hrs"].median())
+        X_tr, _ = models.build_features(tr, pt)
+        X_te, _ = models.build_features(te, pt)
+        off = X_te @ models.fit_ols(X_tr, tr["log_k"].values)["beta"]
+        Z = models.recal_design(te, X_te)
+        y_lk = np.log(te["truth_value"].values / te["total_reviews"].values)
+        groups = te["appid"].values
+        multi = te["appid"].value_counts()
+        appid = multi.index[0]  # 里程碑最多的那款游戏
+        rows = np.where(groups == appid)[0]
+        base = models.loo_recal(Z, off, y_lk, groups)
+        y2 = y_lk.copy()
+        y2[rows] += 5.0
+        again = models.loo_recal(Z, off, y2, groups)
+        np.testing.assert_allclose(base[rows], again[rows], atol=1e-9)
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

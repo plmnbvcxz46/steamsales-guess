@@ -36,7 +36,7 @@ def fig03_overview(conn):
     ax.hist(np.log10(tr["total_reviews"]), bins=bins, color=COLORS[0], alpha=0.85, edgecolor="white", label=f"2018 训练集 ({len(tr)})")
     ax.hist(np.log10(te["total_reviews"]), bins=bins, color=COLORS[1], alpha=0.85, edgecolor="white", label=f"真值集 ({len(te)})")
     ax.legend(frameon=False, fontsize=9)
-    style_axes(ax, "(a) 评测数（对数）", "log₁₀ 截止日评测数", "样本数")
+    style_axes(ax, "(a) 评测数（对数）", "lg 截止日评测数", "样本数")
     ax = axes[1]
     years = np.arange(min(d["release_year"].min(), 2004), 2024)
     c1 = tr["release_year"].value_counts().reindex(years, fill_value=0)
@@ -140,7 +140,7 @@ def fig06_pred_vs_true(conn):
         n, hit = int(ev.loc[code, "sample_size"]), ev.loc[code, "hit_rate_30pct"]
         ax.set_xlim(lo, hi)
         ax.set_ylim(lo, hi)
-        style_axes(ax, f"{title}：±30% 命中 {hit:.1f}%（n={n}）", "log₁₀ 公开销量", "log₁₀ 估算销量")
+        style_axes(ax, f"{title}：±30% 命中 {hit:.1f}%（n={n}）", "lg 公开销量", "lg 估算销量")
     axes[0, 1].text(0.03, 0.97, "竖线：交叉验证残差的 10%~90% 区间", transform=axes[0, 1].transAxes, va="top", fontsize=9, color=INK["secondary"])
     fig.suptitle("真值集：估算 vs 公开销量（对角线 = 估得正好，灰带 = 误差 30% 以内）", fontsize=12, color=INK["primary"])
     save(fig, "fig06_pred_vs_true_intervals.png")

@@ -16,6 +16,8 @@ OUT = BASE_DIR / "sql" / "04_full_data_dump_mysql.sql"
 TABLES = [
     "ods_ars_players_2018", "ods_steam_appdetails", "ods_steam_reviews_at_cutoff", "ods_steamcharts_monthly",
     "ods_recent_sales_truth", "ods_price_history_wayback", "ods_review_monthly_policy_scan",
+    # ods_itad_price_history 有 30 多万行，放进转储会让文件翻倍；原始 CSV 在 data/raw/ 里，需要时用 LOAD DATA 导入
+    "ods_official_sales_truth_v2", "ods_review_language_counts", "ods_itad_bundles",
     "etl_job_log", "etl_checkpoint", "etl_clean_error_log",
     "dim_genre", "dim_release_date", "dim_estimation_method", "dim_game", "dim_price_scd2",
     "dwd_game_sample", "fact_sales_estimation", "fact_snapshot",

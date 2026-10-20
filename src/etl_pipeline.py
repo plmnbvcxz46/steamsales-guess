@@ -24,6 +24,7 @@ import sqlite3
 import pathlib
 import datetime as dt
 
+import numpy as np
 import pandas as pd
 
 BASE_DIR = pathlib.Path(__file__).resolve().parent.parent
@@ -36,6 +37,18 @@ ARS_SOURCE_URL = "https://arstechnica.com/wp-content/uploads/2018/07/games_achie
 MIN_PLAYERS_2018 = 5000
 MIN_REVIEWS_2018 = 500
 BATCH_SIZE = 200
+
+# 新真值集（src/truth_v2_merge.py 合并两轮收集结果、按口径分层）：哪些层进明细层、哪些参与校准
+# 第一次全量跑时 S2（标了 Steam、原句却没说平台）也参与了校准，结果它的误差是 S1 的两倍（融合中位 |ln 误差| 0.75 vs 0.37），
+# 里面有不少"首日卖了多少"却按发帖日截止、或者把全平台当 Steam 的条目，把校准带偏。所以 S2 改为只作参考。
+TRUTH_V2_TIERS_FIT = ("S1_steam_explicit", "Q_steam_split")
+TRUTH_V2_TIERS_REF = ("S2_steam_labelled", "P_pc")  # 进明细层但不参与校准，只作参考（P 是 PC 全商店口径，Steam 销量 <= 这个数）
+MIN_REVIEWS_TRUTH = 20  # 真值样本的最少评测数：评测太少时，评测数本身的随机波动就有 ±20% 以上，k 没有意义
+# 各语言评测数（src/crawler_extra.py langs）；spanish = 西班牙西语，latam = 拉美西语，两者合并成一个特征
+LANGS = ["english", "russian", "german", "french", "polish", "brazilian", "spanish", "latam",
+         "japanese", "koreana", "tchinese", "turkish"]
+LANG_FEATURES = ["english", "russian", "german", "french", "polish", "brazilian", "spanish_all",
+                 "japanese", "koreana", "tchinese", "turkish"]
 
 # 主类型优先级：一款游戏往往同时挂 Action、Adventure、Indie 等多个标签，取最"具体"的那个当主类型
 GENRE_PRIORITY = ["RPG", "Strategy", "Simulation", "Racing", "Sports", "Adventure", "Action",
@@ -85,6 +98,21 @@ DDL = [
         PRIMARY KEY (appid, wayback_timestamp))""",
     """CREATE TABLE IF NOT EXISTS ods_review_monthly_policy_scan (
         appid INTEGER NOT NULL, month TEXT NOT NULL, new_reviews INTEGER, PRIMARY KEY (appid, month))""",
+    # 2026-10-20 新增：第二批真值（开发商/发行商公布的 Steam 销量，两轮收集 + 分层）与补充特征的原始数据
+    """CREATE TABLE IF NOT EXISTS ods_official_sales_truth_v2 (
+        truth_v2_id INTEGER PRIMARY KEY, appid INTEGER NOT NULL, game TEXT, report_date TEXT NOT NULL,
+        as_of_date TEXT NOT NULL, as_of_rule TEXT, reported_number REAL NOT NULL, number_text TEXT, steam_truth REAL,
+        tier TEXT NOT NULL, platform_scope TEXT, is_lower_bound TEXT, source_type TEXT, source_url TEXT,
+        collect_round INTEGER, quote_found_on_page TEXT)""",
+    """CREATE TABLE IF NOT EXISTS ods_review_language_counts (
+        appid INTEGER NOT NULL, cohort TEXT NOT NULL, cutoff_date TEXT NOT NULL, language TEXT NOT NULL,
+        total_reviews INTEGER, PRIMARY KEY (appid, cohort, cutoff_date, language))""",
+    """CREATE TABLE IF NOT EXISTS ods_itad_price_history (
+        appid INTEGER NOT NULL, country TEXT NOT NULL, ts TEXT NOT NULL, currency TEXT, price REAL, regular REAL,
+        cut INTEGER)""",
+    """CREATE TABLE IF NOT EXISTS ods_itad_bundles (
+        appid INTEGER NOT NULL, bundle_id INTEGER NOT NULL, title TEXT, page TEXT, publish TEXT,
+        PRIMARY KEY (appid, bundle_id))""",
     # ---------------- 运维表 ----------------
     """CREATE TABLE IF NOT EXISTS etl_job_log (
         job_id INTEGER PRIMARY KEY AUTOINCREMENT, job_name TEXT NOT NULL, start_time TEXT NOT NULL,
@@ -163,10 +191,23 @@ DDL = [
 ]
 
 
+# 明细层 2026-10-20 新增的列（各语言评测占比、ITAD 价格与慈善包特征）。旧库用 ALTER TABLE 补上，不用删库重建
+DWD_EXTRA_COLS = [(f"share_{l}", "REAL") for l in LANG_FEATURES] + [
+    ("itad_covered", "INTEGER"), ("price_at_cutoff_usd", "REAL"), ("launch_price_usd", "REAL"),
+    ("n_discounts", "INTEGER"), ("max_cut", "INTEGER"), ("frac_time_discounted", "REAL"),
+    ("frac_time_cut75", "REAL"), ("n_bundles", "INTEGER"),
+    ("ln_regional_cn", "REAL"), ("ln_regional_tr", "REAL"), ("ln_regional_br", "REAL"),
+]
+
+
 def init_dw_tables(conn):
     with conn:
         for stmt in DDL:
             conn.execute(stmt)
+        have = {r[1] for r in conn.execute("PRAGMA table_info(dwd_game_sample)")}
+        for col, typ in DWD_EXTRA_COLS:
+            if col not in have:
+                conn.execute(f"ALTER TABLE dwd_game_sample ADD COLUMN {col} {typ}")
 
 
 def now_str():
@@ -213,6 +254,24 @@ def load_table_from_csv(conn, table, csv_path, columns, transform=None):
     return len(rows)
 
 
+def load_df(conn, table, df, columns):
+    """和 load_table_from_csv 一样（先清空再写入），但输入是已经拼好的 DataFrame。"""
+    rows = [tuple(none_if_nan(rec.get(c)) for c in columns) for rec in df.to_dict("records")]
+    with conn:
+        conn.execute(f"DELETE FROM {table};")
+        conn.executemany(f"INSERT INTO {table} ({', '.join(columns)}) VALUES ({', '.join('?' * len(columns))})", rows)
+    return len(rows)
+
+
+def read_with_v2(name, keys):
+    """主表 + 新真值集单独导出的同结构表（*_truth_v2.csv）拼在一起，按主键去重（同一款游戏两边都有时保留主表那条）。"""
+    df = pd.read_csv(RAW_DIR / f"{name}.csv")
+    p2 = RAW_DIR / f"{name}_truth_v2.csv"
+    if p2.exists():
+        df = pd.concat([df, pd.read_csv(p2)], ignore_index=True)
+    return df.drop_duplicates(subset=keys, keep="first")
+
+
 def load_ods(conn):
     t0 = time.time()
     n = 0
@@ -220,18 +279,19 @@ def load_ods(conn):
     n += load_table_from_csv(conn, "ods_ars_players_2018", RAW_DIR / "ars_players_2018.csv",
                              ["row_no", "appid", "title", "players", "source_url"],
                              lambda r: {**r, "row_no": next(ars_row_no), "source_url": ARS_SOURCE_URL})
-    n += load_table_from_csv(conn, "ods_steam_appdetails", RAW_DIR / "steam_appdetails.csv",
+    n += load_df(conn, "ods_steam_appdetails", read_with_v2("steam_appdetails", ["appid"]),
                              ["appid", "success", "name", "app_type", "is_free", "release_date_text", "release_date",
                               "currency", "initial_price_usd", "final_price_usd", "discount_percent", "genres",
                               "categories", "developers", "publishers", "metacritic", "achievements_total",
                               "supports_schinese", "fetched_at"])
-    n += load_table_from_csv(conn, "ods_steam_reviews_at_cutoff", RAW_DIR / "steam_reviews_at_cutoff.csv",
+    n += load_df(conn, "ods_steam_reviews_at_cutoff",
+                 read_with_v2("steam_reviews_at_cutoff", ["appid", "cohort", "cutoff_date"]),
                              ["appid", "cohort", "cutoff_date", "cutoff_ts", "total_reviews", "total_positive",
                               "total_negative", "schinese_reviews", "steam_purchase_reviews", "reviews_before_policy",
                               "sample_n", "sample_median_playtime_at_review_hrs",
                               "sample_mean_playtime_at_review_hrs", "first_review_date", "fetched_at"])
-    n += load_table_from_csv(conn, "ods_steamcharts_monthly", RAW_DIR / "steamcharts_monthly.csv",
-                             ["appid", "month", "avg_players", "peak_players"])
+    n += load_df(conn, "ods_steamcharts_monthly", read_with_v2("steamcharts_monthly", ["appid", "month"]),
+                 ["appid", "month", "avg_players", "peak_players"])
     # 真值表本身没有主键（同一款游戏可能有两个公布日期，比如 Missing Hiker），按文件里的行号编 truth_id
     row_no = iter(range(1, 100000))
     n += load_table_from_csv(conn, "ods_recent_sales_truth", RAW_DIR / "recent_sales_truth.csv",
@@ -244,7 +304,20 @@ def load_ods(conn):
                                   "final_price_usd", "discount_percent", "archive_url"])
     n += load_table_from_csv(conn, "ods_review_monthly_policy_scan", RAW_DIR / "review_monthly_policy_scan.csv",
                              ["appid", "month", "new_reviews"])
-    log_etl_job(conn, "ODS_FULL_LOAD", t0, n, n, 0, "SUCCESS", "原始层 7 张表全量装载（先清空再写入，同一事务）")
+    # ---- 2026-10-20 新增 ----
+    n += load_table_from_csv(conn, "ods_official_sales_truth_v2", RAW_DIR / "official_sales_truth_v2.csv",
+                             ["truth_v2_id", "appid", "game", "report_date", "as_of_date", "as_of_rule",
+                              "reported_number", "number_text", "steam_truth", "tier", "platform_scope",
+                              "is_lower_bound", "source_type", "source_url", "collect_round", "quote_found_on_page"])
+    lang = pd.read_csv(RAW_DIR / "review_language_counts.csv").drop_duplicates(
+        subset=["appid", "cohort", "cutoff_date", "language"])
+    n += load_df(conn, "ods_review_language_counts", lang, ["appid", "cohort", "cutoff_date", "language", "total_reviews"])
+    hist = pd.read_csv(RAW_DIR / "itad_price_history.csv").rename(columns={"timestamp": "ts"})
+    n += load_df(conn, "ods_itad_price_history", hist, ["appid", "country", "ts", "currency", "price", "regular", "cut"])
+    bund = pd.read_csv(RAW_DIR / "itad_bundles.csv").drop_duplicates(subset=["appid", "bundle_id"])
+    n += load_df(conn, "ods_itad_bundles", bund, ["appid", "bundle_id", "title", "page", "publish"])
+    log_etl_job(conn, "ODS_FULL_LOAD", t0, n, n, 0, "SUCCESS",
+                "原始层 11 张表全量装载（先清空再写入，同一事务）；评测/商店/SteamCharts 含新真值集的样本")
 
 
 # ------------------------------------------------------------------------------
@@ -369,6 +442,13 @@ def build_candidates(conn, policy):
             "SELECT truth_id, appid, game, report_date, reported_sales, source_url FROM ods_recent_sales_truth ORDER BY truth_id"):
         cands.append({"key": f"T{truth_id:08d}", "appid": appid, "cohort": "truth", "cutoff_date": report_date,
                       "truth_value": sales, "truth_type": "reported_sales", "source_url": src, "fallback_name": game})
+    # 新真值集：截止日取 as_of_date（"首日/首周卖了多少"已换算成 发售日 + 天数），真值取 Steam 口径的数字
+    tiers = TRUTH_V2_TIERS_FIT + TRUTH_V2_TIERS_REF
+    for tid, appid, game, as_of, value, tier, src in conn.execute(
+            f"""SELECT truth_v2_id, appid, game, as_of_date, steam_truth, tier, source_url FROM ods_official_sales_truth_v2
+                WHERE steam_truth IS NOT NULL AND tier IN ({','.join('?' * len(tiers))}) ORDER BY truth_v2_id""", tiers):
+        cands.append({"key": f"W{tid:08d}", "appid": appid, "cohort": "truth_v2", "cutoff_date": as_of,
+                      "truth_value": value, "truth_type": tier, "source_url": src, "fallback_name": game})
     cands.sort(key=lambda c: c["key"])
     return cands, apps, reviews, charts
 
@@ -441,7 +521,11 @@ def clean_one(c, apps, reviews, charts, policy):
         first_month = month_rows[0][0]
         # 只有 SteamCharts 从发售后两个月内就开始记录，累计小时才算完整；2012 年 7 月以前发售的游戏都不完整
         rel_plus2 = (rel.replace(day=1) + dt.timedelta(days=62)).strftime("%Y-%m")
-        if first_month <= rel_plus2 and first_month < c["cutoff_date"][:7]:
+        # 截止日距"确定的上架日"（商店日期或第一条评测，不用 SteamCharts 月份）不足 45 天时，还没有一个完整月的在线数据，
+        # 信号 B 只能算到上架前的零星记录（SCUM、《史丹利的寓言》按首周销量截止时，B 只有真值的万分之一）。这种情况不算 B
+        firm = [d for d, src in options if src != "steamcharts_first_month"]
+        firm_rel = dt.date.fromisoformat(min(firm)) if firm else rel
+        if first_month <= rel_plus2 and first_month < c["cutoff_date"][:7] and (cut - firm_rel).days >= 45:
             coverage = 1
             hours = charts_hours_before(month_rows, c["cutoff_date"], release_date)
             if hours <= 0:
@@ -479,7 +563,93 @@ DWD_COLS = ["sample_id", "appid", "name", "cohort", "era_group", "cutoff_date", 
             "reviews_after_policy", "positive_rate", "positive_rate_tier", "schinese_ratio", "steam_purchase_ratio",
             "playtime_review_median_hrs", "review_sample_n", "charts_total_hours", "charts_coverage", "truth_value",
             "truth_type", "k_ratio", "log_k", "log_reviews", "log_price", "model_eligible", "eligibility_note",
-            "source_url"]
+            "source_url"] + [c for c, _ in DWD_EXTRA_COLS]
+
+
+def load_extra_lookups(conn):
+    """补充特征用的查找表：各语言评测数、ITAD 价格历史（按游戏和地区）、慈善包发布时间。"""
+    langs = {}
+    for appid, cohort, cut, lang, n in conn.execute(
+            "SELECT appid, cohort, cutoff_date, language, total_reviews FROM ods_review_language_counts"):
+        langs.setdefault((appid, cohort, cut), {})[lang] = n or 0
+    hist = pd.read_sql_query("SELECT appid, country, ts, regular, cut FROM ods_itad_price_history", conn)
+    hist["t"] = pd.to_datetime(hist["ts"], utc=True, format="ISO8601").astype("int64") // 10 ** 9
+    itad = {}
+    for (appid, country), g in hist.sort_values("t").groupby(["appid", "country"]):
+        itad[(appid, country)] = (g["t"].values, g["regular"].values.astype(float), g["cut"].fillna(0).values.astype(float))
+    bund = pd.read_sql_query("SELECT appid, publish FROM ods_itad_bundles", conn)
+    bund["t"] = pd.to_datetime(bund["publish"], utc=True, errors="coerce", format="ISO8601")
+    bundles = {a: np.sort(g["t"].dropna().astype("int64").values // 10 ** 9) for a, g in bund.groupby("appid")}
+    return {"langs": langs, "itad": itad, "bundles": bundles}
+
+
+def extra_features(row, lk):
+    """
+    截至截止日的补充特征（全部只用截止日当天及以前的数据，不看真值）：
+    - 各语言评测占比：现有模型只有简中一种语言；德语、波兰语玩家写评测的意愿明显不同
+    - ITAD 美区价格历史：截止日当时的原价（替代 2026 年抓取时的商店价）、首发价、打折次数、最深折扣、打折时间占比
+    - 中国/土耳其/巴西区原价相对美区的比值（取对数）：低价区定价策略
+    - 截止日前进过几次慈善包
+    """
+    out = {c: None for c, _ in DWD_EXTRA_COLS}
+    cut_ts = int(dt.datetime.fromisoformat(row["cutoff_date"]).replace(tzinfo=dt.timezone.utc).timestamp()) + 86399
+    n = row["total_reviews"]
+    lc = lk["langs"].get((row["appid"], row["cohort"], row["cutoff_date"]))
+    if lc and n:
+        for l in LANG_FEATURES:
+            v = lc.get("spanish", 0) + lc.get("latam", 0) if l == "spanish_all" else lc.get(l, 0)
+            out[f"share_{l}"] = round(min(v / n, 1.0), 5)
+    us = lk["itad"].get((row["appid"], "US"))
+    out["itad_covered"] = 0
+    if us is not None:
+        t, reg, cut = us
+        m = t <= cut_ts
+        if m.sum() > 0 and reg[m][-1] > 0:
+            t, reg, cut = t[m], reg[m], cut[m]
+            out["itad_covered"] = 1
+            out["price_at_cutoff_usd"] = float(reg[-1])
+            out["launch_price_usd"] = float(reg[0])
+            started = (cut > 0) & (np.r_[0, cut[:-1]] == 0)
+            out["n_discounts"] = int(started.sum())
+            out["max_cut"] = int(cut.max())
+            dur = np.clip(np.r_[t[1:], cut_ts] - t, 0, None).astype(float)
+            tot = dur.sum()
+            if tot > 0:
+                out["frac_time_discounted"] = round(float(dur[cut > 0].sum() / tot), 5)
+                out["frac_time_cut75"] = round(float(dur[cut >= 75].sum() / tot), 5)
+            for country in ("CN", "TR", "BR"):
+                h = lk["itad"].get((row["appid"], country))
+                if h is not None:
+                    mm = h[0] <= cut_ts
+                    if mm.sum() > 0 and h[1][mm][-1] > 0:
+                        out[f"ln_regional_{country.lower()}"] = round(math.log(h[1][mm][-1] / reg[-1]), 5)
+    b = lk["bundles"].get(row["appid"])
+    out["n_bundles"] = int((b <= cut_ts).sum()) if b is not None else 0
+    return out
+
+
+def truth_eligibility(row):
+    """真值样本里不参与校准的：评测太少的、只是 PC 全商店口径（上界）的。返回要写进清洗日志的记录。"""
+    if row["cohort"] not in ("truth", "truth_v2"):
+        return []
+    issues = []
+    if row["total_reviews"] < MIN_REVIEWS_TRUTH:
+        row["model_eligible"], row["eligibility_note"] = 0, f"评测数 {row['total_reviews']} < {MIN_REVIEWS_TRUTH}，k 的随机误差太大"
+        issues.append(("TRUTH_FEW_REVIEWS", row["eligibility_note"], "FLAGGED"))
+    if row["cutoff_date"] < "2013-11-01":
+        row["model_eligible"], row["eligibility_note"] = 0, "Steam 评测系统 2013-11 才上线，截止日在此之前，评测数不可比"
+        issues.append(("TRUTH_BEFORE_REVIEW_SYSTEM", row["eligibility_note"], "FLAGGED"))
+    elif row["k_ratio"] < 2:
+        # 每 2 份销量就有 1 条评测，远超 Steam 上见过的评测率；多半是把"首月/首周"的数字配上了多年后的评测数
+        row["model_eligible"], row["eligibility_note"] = 0, f"k = {row['k_ratio']:.2f} < 2，不合常理，多半是时间点配错"
+        issues.append(("TRUTH_IMPLAUSIBLE_K", row["eligibility_note"], "FLAGGED"))
+    if row["truth_type"] == "P_pc":
+        row["model_eligible"], row["eligibility_note"] = 0, "PC 全商店口径，真实 Steam 销量不超过该数，只作参考"
+        issues.append(("TRUTH_PC_UPPER_BOUND", row["eligibility_note"], "FLAGGED"))
+    elif row["truth_type"] in TRUTH_V2_TIERS_REF:
+        row["model_eligible"], row["eligibility_note"] = 0, "标为 Steam 口径但原句没提平台，口径存疑，只作参考"
+        issues.append(("TRUTH_SCOPE_UNVERIFIED", row["eligibility_note"], "FLAGGED"))
+    return issues
 
 
 class SimulatedCrash(Exception):
@@ -507,6 +677,7 @@ def clean_ods_to_dwd(conn, policy, crash_after_batches=None):
         print(f"[ETL] 检测到上次未完成（状态 {cp[1]}），从样本键 > {resume_key} 继续", flush=True)
 
     cands, apps, reviews, charts = build_candidates(conn, policy)
+    lk = load_extra_lookups(conn)
     todo = [c for c in cands if c["key"] > resume_key]
     next_id = (conn.execute("SELECT COALESCE(MAX(sample_id), 0) FROM dwd_game_sample").fetchone()[0]) + 1
     loaded = rejected = 0
@@ -515,6 +686,9 @@ def clean_ods_to_dwd(conn, policy, crash_after_batches=None):
         with conn:  # 一批一个事务：要么整批写入并推进检查点，要么整批都不生效
             for c in batch:
                 row, issues = clean_one(c, apps, reviews, charts, policy)
+                if row is not None:
+                    row.update(extra_features(row, lk))
+                    issues = issues + truth_eligibility(row)
                 for code, desc, action in issues:
                     conn.execute(
                         """INSERT INTO etl_clean_error_log (job_name, appid, cohort, game_name, rule_code,
@@ -681,7 +855,8 @@ def run_pipeline(demo_resume=False):
     create_sql_views(conn)
     print("=== ETL 完成 ===")
     for tbl in ["ods_ars_players_2018", "ods_steam_appdetails", "ods_steam_reviews_at_cutoff", "ods_steamcharts_monthly",
-                "ods_recent_sales_truth", "ods_price_history_wayback", "dwd_game_sample", "dim_game", "dim_price_scd2",
+                "ods_recent_sales_truth", "ods_official_sales_truth_v2", "ods_review_language_counts",
+                "ods_itad_price_history", "ods_itad_bundles", "ods_price_history_wayback", "dwd_game_sample", "dim_game", "dim_price_scd2",
                 "fact_snapshot", "etl_clean_error_log", "etl_job_log"]:
         print(f"  {tbl:30s} {conn.execute(f'SELECT COUNT(*) FROM {tbl}').fetchone()[0]:7d} 行")
     for cohort, era, n, n_ok in conn.execute(

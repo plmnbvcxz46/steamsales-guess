@@ -68,14 +68,26 @@ def build_row(appid, cutoff, policy):
     }
 
 
-def fit_everything(conn):
-    """和 models.py 相同的全量拟合；近年校准与融合权重用全部真值。"""
+def chosen_feature_set(conn):
+    """models.py 按 2018 交叉验证选定的特征集（写在 ads_policy_calibration 里）；没跑过新版 models.py 时用 base。"""
+    r = conn.execute("SELECT value FROM ads_policy_calibration WHERE item = 'feature_set_ext'").fetchone()
+    return "ext" if r and r[0] == 1 else "base"
+
+
+def fit_everything(conn, truth_cohorts=("truth", "truth_v2"), feature_set=None):
+    """
+    和 models.py 相同的全量拟合；近年校准与融合权重用 truth_cohorts 里的全部真值（默认新旧两批）。
+    feature_set 不给时沿用 models.py 选定的那套。
+    被估的游戏如果缺补充特征（比如只采集了评测和 SteamCharts），用 2018 训练样本的中位数填。
+    """
+    feature_set = feature_set or chosen_feature_set(conn)
     df = pd.read_sql_query("SELECT * FROM dwd_game_sample ORDER BY sample_id", conn)
     tr = df[(df["cohort"] == "train_2018") & (df["model_eligible"] == 1)].reset_index(drop=True)
-    te = df[df["cohort"] == "truth"].reset_index(drop=True)
+    te = df[df["cohort"].isin(truth_cohorts) & (df["model_eligible"] == 1)].reset_index(drop=True)
     pt_fill = float(tr["playtime_review_median_hrs"].median())
-    X_tr, _ = models.build_features(tr, pt_fill)
-    X_te, _ = models.build_features(te, pt_fill)
+    fills = models.fit_fills(tr)
+    X_tr, _ = models.build_features(tr, pt_fill, feature_set, fills)
+    X_te, _ = models.build_features(te, pt_fill, feature_set, fills)
     y_tr = tr["log_k"].values
     ols = models.fit_ols(X_tr, y_tr)["beta"]
     q = {tau: models.fit_quantile(X_tr, y_tr, tau) for tau in (0.1, 0.5, 0.9)}
@@ -96,11 +108,12 @@ def fit_everything(conn):
     ln_b = np.log(te["charts_total_hours"].values / np.exp(ab[0] + ab[1] * np.log(pt)))
     F = np.column_stack([np.ones(has_b.sum()), ln_a[has_b], ln_b[has_b]])
     wf, _, _, _ = np.linalg.lstsq(F, np.log(te["truth_value"].values[has_b]), rcond=None)
-    return dict(pt_fill=pt_fill, ols=ols, q=q, tree=tree, ab=ab, w2=w2, w4=w4, wf=wf)
+    return dict(pt_fill=pt_fill, ols=ols, q=q, tree=tree, ab=ab, w2=w2, w4=w4, wf=wf,
+                feature_set=feature_set, fills=fills)
 
 
 def estimate(row_df, fit):
-    X, _ = models.build_features(row_df, fit["pt_fill"])
+    X, _ = models.build_features(row_df, fit["pt_fill"], fit["feature_set"], fit["fills"])
     Z = models.recal_design(row_df, X)
     n = row_df["total_reviews"].values.astype(float)
     out = pd.DataFrame({"cutoff_date": row_df["cutoff_date"], "total_reviews": n.astype(int)})

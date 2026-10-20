@@ -2,9 +2,12 @@
 """
 多方法销量估算、交叉验证、政策校准、双信号融合与结果回写 (src/models.py)
 
-两类样本：
+三类样本：
     train_2018：2018-07-01 泄露玩家数 + 截至当天的评测（只用 model_eligible=1 的，避开抽样截断）
     truth     ：Gamalytic 测试表里 118 条有出处的公开销量 + 截至公布日的评测
+    truth_v2  ：2026-10-20 新收集的开发商/发行商公布的 Steam 销量（只用 Steam 口径的分层，见 src/truth_v2_merge.py）
+近年校准与融合在 truth + truth_v2 上做；同一款游戏可能有好几个里程碑，所以"留一法"按游戏留出（leave-one-game-out）。
+另外单独做一次外部检验：只用旧的 truth 校准，去估 truth_v2，两批游戏没有重复。
 
 几条硬规矩（原版本就是在这里出的问题）：
 1. 任何模型输入都只来自接口采集的数据，绝不由真值反推；
@@ -46,7 +49,48 @@ GAMALYTIC_PUBLISHED = [
 # ==============================================================================
 # 一、特征
 # ==============================================================================
-def build_features(df, pt_fill):
+# ext 特征集新增的列：(dwd 列名或派生规则, 特征代码, 中文名)
+EXT_FEATURES = [
+    ("ln_launch_over_cutoff", "ln(首发价 / 截止日原价)"),
+    ("log1p_discounts", "ln(1 + 截止日前打折次数)"),
+    ("max_cut", "截止日前最深折扣"),
+    ("frac_time_discounted", "打折时间占比"),
+    ("frac_time_cut75", "75% 以上折扣时间占比"),
+    ("log1p_bundles", "ln(1 + 进慈善包次数)"),
+] + [(f"share_{l}", f"{l} 评测占比") for l in ["english", "russian", "german", "french", "polish", "brazilian",
+                                               "spanish_all", "japanese", "koreana", "tchinese", "turkish"]] + [
+    ("ln_regional_cn", "中国区相对定价"), ("ln_regional_tr", "土耳其区相对定价"), ("ln_regional_br", "巴西区相对定价"),
+]
+
+
+def _ext_raw(df):
+    """从明细层的列算出 ext 特征的原始值（缺失的保留 NaN，交给 fills 填）。df 里没有的列一律当缺失。"""
+    def col(c):
+        return df[c].astype(float) if c in df else pd.Series(np.nan, index=df.index)
+    price_now = np.exp(df["log_price"].astype(float))
+    pc = col("price_at_cutoff_usd")
+    raw = {
+        "log_price_at_cutoff": np.log(pc.where(pc > 0, price_now)),
+        "ln_launch_over_cutoff": np.log(col("launch_price_usd") / pc),
+        "log1p_discounts": np.log1p(col("n_discounts")),
+        "max_cut": col("max_cut") / 100.0,
+        "frac_time_discounted": col("frac_time_discounted"),
+        "frac_time_cut75": col("frac_time_cut75"),
+        "log1p_bundles": np.log1p(col("n_bundles")),
+    }
+    for c, _ in EXT_FEATURES:
+        if c.startswith("share_") or c.startswith("ln_regional_"):
+            raw[c] = col(c)
+    return pd.DataFrame(raw, index=df.index).replace([np.inf, -np.inf], np.nan)
+
+
+def fit_fills(tr):
+    """ext 特征的缺失值填充值：一律取 2018 训练样本的中位数（只看训练集，不看真值集）。"""
+    raw = _ext_raw(tr)
+    return {c: float(raw[c].median()) if raw[c].notna().any() else 0.0 for c in raw.columns}
+
+
+def build_features(df, pt_fill, feature_set="base", fills=None):
     """
     ln k 的解释变量。每一项为什么放进来：
     - ln 价格：越贵买家越认真，评测意愿越高，k 越低（文献）
@@ -61,9 +105,16 @@ def build_features(df, pt_fill):
     n = len(df)
     pos = df["positive_rate"].values
     pt = df["playtime_review_median_hrs"].fillna(pt_fill).clip(lower=0.1).values
+    if feature_set == "ext":
+        fills = fills if fills is not None else fit_fills(df)
+        raw = _ext_raw(df).fillna(fills)
+        # ext 用截止日当时的原价（ITAD 价格历史），没有记录时退回 2026 年抓取的商店价
+        log_price = raw["log_price_at_cutoff"].values
+    else:
+        log_price = df["log_price"].values
     cols = [
         np.ones(n),
-        df["log_price"].values,
+        log_price,
         pos - POS_CENTER,
         (pos - POS_CENTER) ** 2,
         df["log_reviews"].values,
@@ -88,6 +139,14 @@ def build_features(df, pt_fill):
     for g in GENRES[1:]:
         cols.append((df["genre"].values == g).astype(float))
         names.append((f"genre_{g}", f"类型: {g}"))
+    if feature_set == "ext":
+        names[1] = ("log_price", "ln 价格（截止日当时的原价）")
+        for c, cn in EXT_FEATURES:
+            v = raw[c].values
+            if c.startswith("ln_regional_"):
+                v = v - fills[c]  # 各区推荐价对美元价大体是固定比例，看的是相对同类游戏偏贵还是偏便宜
+            cols.append(v)
+            names.append((c, cn))
     return np.column_stack(cols), names
 
 
@@ -294,18 +353,22 @@ def fit_recal(Z, offset, y_lk):
     return w
 
 
-def loo_recal(Z, offset, y_lk):
-    """留一法：第 i 款的校准系数只用其余 n-1 款拟合。返回 ln k 的预测。"""
+def loo_recal(Z, offset, y_lk, groups=None):
+    """
+    留一法：第 i 款的校准系数只用其余 n-1 款拟合。返回 ln k 的预测。
+    groups 给定时按组留出（同一款游戏的几个里程碑一起留出），否则一行一组。
+    """
     n = len(y_lk)
+    groups = np.arange(n) if groups is None else np.asarray(groups)
     out = np.zeros(n)
     for i in range(n):
-        keep = np.arange(n) != i
+        keep = groups != groups[i]
         w = fit_recal(Z[keep], offset[keep], y_lk[keep])
         out[i] = offset[i] + Z[i] @ w
     return out
 
 
-def nested_loo_fusion(Z, off_a, y_lk, log_n, log_b, has_b):
+def nested_loo_fusion(Z, off_a, y_lk, log_n, log_b, has_b, groups=None):
     """
     嵌套留一法融合：估第 i 款时，
       1) 用其余 n-1 款拟合信号 A 的近年校准；
@@ -314,10 +377,11 @@ def nested_loo_fusion(Z, off_a, y_lk, log_n, log_b, has_b):
     这样第 i 款的真值在任何一步都没被用到。没有信号 B 的样本直接用校准后的信号 A。
     """
     n = len(y_lk)
+    groups = np.arange(n) if groups is None else np.asarray(groups)
     y_log = y_lk + log_n
     out, weights = np.zeros(n), []
     for i in range(n):
-        keep = np.arange(n) != i
+        keep = groups != groups[i]
         w = fit_recal(Z[keep], off_a[keep], y_lk[keep])
         ln_a_all = log_n + off_a + Z @ w
         if not has_b[i]:
@@ -355,25 +419,46 @@ def run_all_models():
     conn.execute("PRAGMA foreign_keys = ON;")
     df = pd.read_sql_query("SELECT * FROM dwd_game_sample ORDER BY sample_id", conn)
     tr = df[(df["cohort"] == "train_2018") & (df["model_eligible"] == 1)].reset_index(drop=True)
-    te = df[df["cohort"] == "truth"].reset_index(drop=True)
-    print(f"[建模] 2018 训练样本 {len(tr)}，真值样本 {len(te)}", flush=True)
+    te = df[df["cohort"].isin(["truth", "truth_v2"]) & (df["model_eligible"] == 1)].reset_index(drop=True)
+    groups_te = te["appid"].values  # 同一款游戏的几个里程碑一起留出
+    print(f"[建模] 2018 训练样本 {len(tr)}；真值样本 {len(te)} 条 / {te['appid'].nunique()} 款"
+          f"（旧 {int((te.cohort == 'truth').sum())} 条，新 {int((te.cohort == 'truth_v2').sum())} 条）", flush=True)
 
     pt_fill = float(tr["playtime_review_median_hrs"].median())
-    X_tr, feat_names = build_features(tr, pt_fill)
-    X_te, _ = build_features(te, pt_fill)
+    fills = fit_fills(tr)
     y_tr = tr["log_k"].values
 
-    # ---------------- 2018 上 5 折交叉验证 ----------------
+    # ---------------- 特征集：base（原有 19 列）还是 ext（加语言占比、价格历史、慈善包、区域价） ----------------
+    # 只按 2018 五折交叉验证的 R² 选，不看任何真值集，避免"在测试集上挑模型"
     folds = kfold_indices(len(tr), 5, RNG_SEED)
-    oof = {m: np.zeros(len(tr)) for m in ["M2", "M3", "M3_lo", "M3_hi", "M4"]}
+
+    def r2(pred):
+        return float(1 - ((y_tr - pred) ** 2).sum() / ((y_tr - y_tr.mean()) ** 2).sum())
+
+    cv, oof_sets = {}, {}
+    for fs in ("base", "ext"):
+        X_fs, _ = build_features(tr, pt_fill, fs, fills)
+        o2, o4 = np.zeros(len(tr)), np.zeros(len(tr))
+        for fi, val in enumerate(folds):
+            trn = np.setdiff1d(np.arange(len(tr)), val)
+            o2[val] = X_fs[val] @ fit_ols(X_fs[trn], y_tr[trn])["beta"]
+            o4[val] = TreeEnsemble(seed=fi).fit(X_fs[trn][:, 1:], y_tr[trn]).predict(X_fs[val][:, 1:])
+        cv[fs], oof_sets[fs] = (r2(o2), r2(o4)), (o2, o4)
+        print(f"[特征集 {fs}] {X_fs.shape[1]} 列，2018 五折 ln k 的 R²：M2 {cv[fs][0]:.3f}，M4 {cv[fs][1]:.3f}", flush=True)
+    feature_set = "ext" if cv["ext"][1] > cv["base"][1] else "base"
+    print(f"[特征集] 选用 {feature_set}", flush=True)
+
+    X_tr, feat_names = build_features(tr, pt_fill, feature_set, fills)
+    X_te, _ = build_features(te, pt_fill, feature_set, fills)
+
+    # ---------------- 2018 上 5 折交叉验证 ----------------
+    oof = {m: np.zeros(len(tr)) for m in ["M3", "M3_lo", "M3_hi"]}
+    oof["M2"], oof["M4"] = oof_sets[feature_set]
     for fi, val in enumerate(folds):
         trn = np.setdiff1d(np.arange(len(tr)), val)
-        b = fit_ols(X_tr[trn], y_tr[trn])["beta"]
-        oof["M2"][val] = X_tr[val] @ b
         for tau, key in [(0.5, "M3"), (0.1, "M3_lo"), (0.9, "M3_hi")]:
             oof[key][val] = X_tr[val] @ fit_quantile(X_tr[trn], y_tr[trn], tau)
-        oof["M4"][val] = TreeEnsemble(seed=fi).fit(X_tr[trn][:, 1:], y_tr[trn]).predict(X_tr[val][:, 1:])
-        print(f"[建模] 第 {fi + 1}/5 折完成", flush=True)
+        print(f"[建模] M3 第 {fi + 1}/5 折完成", flush=True)
 
     # ---------------- 全量 2018 拟合（给真值集用） ----------------
     ols = fit_ols(X_tr, y_tr)
@@ -427,7 +512,7 @@ def run_all_models():
     Z = recal_design(te, X_te)
     est_te = {}
     for m in ["M2", "M4"]:
-        est_te[m] = np.exp(log_n_te + loo_recal(Z, np.log(k_pre[m]), y_lk_te))
+        est_te[m] = np.exp(log_n_te + loo_recal(Z, np.log(k_pre[m]), y_lk_te, groups_te))
     # M3：中位数沿用 M2 的校准；区间宽度取 2018 分位数回归的 10%/90% 与 50% 之差
     est_te["M3"] = est_te["M2"]
     est_te["M3_lo"] = est_te["M2"] * k_pre["M3_lo"] / k_pre["M3"]
@@ -436,7 +521,7 @@ def run_all_models():
 
     # ---------------- 融合（嵌套留一法） ----------------
     log_b = np.log(np.where(has_b_te, y_b_te, 1.0))
-    fused_log, w_list = nested_loo_fusion(Z, np.log(k_pre["M4"]), y_lk_te, log_n_te, log_b, has_b_te)
+    fused_log, w_list = nested_loo_fusion(Z, np.log(k_pre["M4"]), y_lk_te, log_n_te, log_b, has_b_te, groups_te)
     est_te["Fusion_AB"] = np.exp(fused_log)
     w_m4_full = fit_recal(Z, np.log(k_pre["M4"]), y_lk_te)
     ln_a_full = log_n_te + np.log(k_pre["M4"]) + Z @ w_m4_full
@@ -446,6 +531,32 @@ def run_all_models():
     print(f"[近年校准] M2 校准中政策后评测占比的系数 δ={w_recal_full[1]:.3f}（相当于 k × {math.exp(w_recal_full[1]):.3f}）", flush=True)
     print(f"[融合] 全样本权重 ln Y = {w_full[0]:.3f} + {w_full[1]:.3f} ln Y_A + {w_full[2]:.3f} ln Y_B "
           f"（评估用的是嵌套留一法）", flush=True)
+
+    # ---------------- 外部检验：只用旧真值校准，估新真值集（两批游戏没有重复，不需要留一法） ----------------
+    ext_val = {}
+    old, new = (te["cohort"] == "truth").values, (te["cohort"] == "truth_v2").values
+    for fs in ("base", "ext"):
+        if fs == feature_set:
+            Xa, Xe, ols_b, tree_fs = X_tr, X_te, ols["beta"], tree
+        else:
+            Xa, _ = build_features(tr, pt_fill, fs, fills)
+            Xe, _ = build_features(te, pt_fill, fs, fills)
+            ols_b, tree_fs = fit_ols(Xa, y_tr)["beta"], TreeEnsemble(seed=99).fit(Xa[:, 1:], y_tr)
+        Ze = recal_design(te, Xe)
+        off2, off4 = Xe @ ols_b, tree_fs.predict(Xe[:, 1:])
+        w2 = fit_recal(Ze[old], off2[old], y_lk_te[old])
+        w4 = fit_recal(Ze[old], off4[old], y_lk_te[old])
+        ln_a = log_n_te + off4 + Ze @ w4
+        hb = has_b_te & old
+        v, _, _, _ = np.linalg.lstsq(np.column_stack([np.ones(hb.sum()), ln_a[hb], log_b[hb]]),
+                                     np.log(y_true_te[hb]), rcond=None)
+        fused = np.where(has_b_te, v[0] + v[1] * ln_a + v[2] * log_b, ln_a)
+        ext_val[fs] = {"M0": te["total_reviews"].values * 30.0,
+                       "M2": np.exp(log_n_te + off2 + Ze @ w2), "M4": np.exp(ln_a), "Fusion_AB": np.exp(fused)}
+    for fs, e in ext_val.items():
+        le = np.log(e["Fusion_AB"][new] / y_true_te[new])
+        print(f"[外部检验 {fs}] 新真值集 {new.sum()} 条：融合 ±30% 命中 {100 * np.mean(np.abs(np.exp(le) - 1) <= 0.3):.1f}%，"
+              f"中位 |ln 误差| {np.median(np.abs(le)):.3f}", flush=True)
 
     # ---------------- 写事实表 ----------------
     game_key = dict(conn.execute("SELECT appid, game_key FROM dim_game").fetchall())
@@ -523,8 +634,14 @@ def run_all_models():
         eval_rows.append((cohort_label, code, name, m["n"], round(m["mape"], 2), round(m["mdape"], 2),
                           round(m["r2_log"], 4), round(m["hit10"], 2), round(m["hit30"], 2), round(m["hit50"], 2), note))
 
+    is_truth = fact["cohort"].isin(["truth", "truth_v2"])
     groups = [
         ("2018 五折交叉验证", fact["cohort"] == "train_2018", "袋外预测；真值是泄露玩家数"),
+        ("合并真值集 全部", is_truth, "旧 Gamalytic 表 + 新收集的 Steam 口径销量；校准与融合按游戏留一法"),
+        ("新真值集 全部", fact["cohort"] == "truth_v2", "2026-10-20 新收集，Steam 口径（S1+S2+Q 分层）"),
+        ("合并真值集 政策前公布", is_truth & (fact["era_group"] == "pre_policy"), ""),
+        ("合并真值集 跨时代", is_truth & (fact["era_group"] == "cross_era"), "政策前发售、政策后公布"),
+        ("合并真值集 政策后发售", is_truth & (fact["era_group"] == "post_policy"), ""),
         ("真值集 全部", fact["cohort"] == "truth", "真值是公开销量；政策系数与融合权重为留一法"),
         ("真值集 政策前公布", (fact["cohort"] == "truth") & (fact["era_group"] == "pre_policy"), ""),
         ("真值集 跨时代", (fact["cohort"] == "truth") & (fact["era_group"] == "cross_era"), "政策前发售、政策后公布"),
@@ -538,20 +655,26 @@ def run_all_models():
             add_eval(label, code, method_name[code], s["true_value"].values, s["estimated_sales"].values, note + extra)
 
     # 公平比较：只看"信号 B 可用"的那部分真值样本，A、B、融合三者同一批游戏
-    b_ids = set(fact[(fact["cohort"] == "truth") & (fact["method_code"] == "Signal_B")]["sample_id"])
-    sub = fact[(fact["cohort"] == "truth") & fact["sample_id"].isin(b_ids)]
+    b_ids = set(fact[is_truth & (fact["method_code"] == "Signal_B")]["sample_id"])
+    sub = fact[is_truth & fact["sample_id"].isin(b_ids)]
     for code in ["M0", "M2", "M4", "Signal_B", "Fusion_AB"]:
         s = sub[sub["method_code"] == code]
-        add_eval("真值集 信号B可用子集", code, method_name[code], s["true_value"].values, s["estimated_sales"].values,
+        add_eval("合并真值集 信号B可用子集", code, method_name[code], s["true_value"].values, s["estimated_sales"].values,
                  "同一批游戏上比较 A / B / 融合")
+
+    # 外部检验：只用旧真值校准，估新真值集（base 与 ext 两套特征都报）
+    for fs, e in ext_val.items():
+        for code in ["M0", "M2", "M4", "Fusion_AB"]:
+            add_eval(f"外部检验 {fs}（旧真值校准→新真值集）", code, method_name[code], y_true_te[new], e[code][new],
+                     f"特征集 {fs}；新真值集与旧真值集没有重复的游戏" + ("（本次选用）" if fs == feature_set else ""))
 
     # 直接迁移（只调政策系数 r）与近年校准的对比
     for code, note in [("M2_no_calib", "直接迁移，不做政策校准 r=1"),
                        ("M2_r_lit", "直接迁移，文献值 r=0.5，不用真值"),
                        ("M2_r_scan", f"直接迁移，评测量跳升倒数 r={r_scan:.3f}，不用真值"),
                        ("M2_r_loo", "直接迁移，r 用留一法拟合")]:
-        add_eval("真值集 迁移方式对比", code, "M2 " + note, y_true_te, transfer[code], note)
-    add_eval("真值集 迁移方式对比", "M2", "M2 近年校准（全部系数留一法重估）", y_true_te, est_te["M2"], "即主表中的 M2")
+        add_eval("合并真值集 迁移方式对比", code, "M2 " + note, y_true_te, transfer[code], note)
+    add_eval("合并真值集 迁移方式对比", "M2", "M2 近年校准（全部系数按游戏留一法重估）", y_true_te, est_te["M2"], "即主表中的 M2")
 
     # Gamalytic 在同一批游戏上的估算（来自同一张表的 Estimate 列）
     truth_ods = pd.read_sql_query("SELECT truth_id, appid, report_date, gamalytic_estimate FROM ods_recent_sales_truth", conn)
@@ -589,6 +712,13 @@ def run_all_models():
     # 不相关 -> 政策只改变了整体水平，2018 的系数可以沿用；相关 -> 该系数也变了
     resid_te = np.log(y_true_te / transfer["M2_r_loo"])  # 检验的是"直接迁移"的残差
     calib_rows = [
+        ("feature_set_ext", 1.0 if feature_set == "ext" else 0.0, "1 = 选用 ext 特征集（按 2018 五折 M4 的 R² 选）"),
+        ("cv_r2_m2_base", cv["base"][0], "2018 五折 ln k 的 R²，base 特征集"),
+        ("cv_r2_m4_base", cv["base"][1], ""),
+        ("cv_r2_m2_ext", cv["ext"][0], "2018 五折 ln k 的 R²，ext 特征集"),
+        ("cv_r2_m4_ext", cv["ext"][1], ""),
+        ("truth_rows_used", float(len(te)), "参与校准的真值样本条数（旧 + 新）"),
+        ("truth_games_used", float(te["appid"].nunique()), "参与校准的真值游戏数"),
         ("transfer_r_loo_full", r_full, "直接迁移时政策系数 r 的全样本拟合值"),
         ("transfer_r_loo_min", float(r_used.min()), "留一法各次拟合 r 的最小值"),
         ("transfer_r_loo_max", float(r_used.max()), "留一法各次拟合 r 的最大值"),

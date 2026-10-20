@@ -12,6 +12,7 @@ DROP TABLE IF EXISTS fact_sales_estimation, fact_snapshot, dwd_game_sample, dim_
     ads_feature_importance, ads_policy_calibration, etl_job_log, etl_checkpoint, etl_clean_error_log,
     ods_ars_players_2018, ods_steam_appdetails, ods_steam_reviews_at_cutoff, ods_steamcharts_monthly,
     ods_recent_sales_truth, ods_price_history_wayback, ods_review_monthly_policy_scan,
+    ods_official_sales_truth_v2, ods_review_language_counts, ods_itad_price_history, ods_itad_bundles,
     stg_kettle_train_clean, dim_price_scd2_kettle;
 SET FOREIGN_KEY_CHECKS = 1;
 
@@ -68,6 +69,32 @@ CREATE TABLE ods_review_monthly_policy_scan (
     appid INT NOT NULL, month CHAR(7) NOT NULL, new_reviews INT,
     PRIMARY KEY (appid, month)
 ) ENGINE=InnoDB COMMENT='原始层：40 款老游戏每月新增评测数（判定评测提示上线月份）';
+
+-- 2026-10-20 新增：第二批真值与补充特征的原始数据
+CREATE TABLE ods_official_sales_truth_v2 (
+    truth_v2_id INT PRIMARY KEY, appid INT NOT NULL, game VARCHAR(255), report_date DATE NOT NULL,
+    as_of_date DATE NOT NULL COMMENT '数字对应的时间点（"首日/首周"已换算成 发售日 + 天数）', as_of_rule VARCHAR(30),
+    reported_number DOUBLE NOT NULL, number_text VARCHAR(100), steam_truth DOUBLE COMMENT 'Steam 口径的真值（Q 层 = 总数 × Steam 占比）',
+    tier VARCHAR(30) NOT NULL COMMENT 'S1 原句写 Steam / S2 标了 Steam 但原句没说 / Q 拆分 / P PC 全商店 / X 排除',
+    platform_scope VARCHAR(30), is_lower_bound VARCHAR(10), source_type VARCHAR(30), source_url VARCHAR(1000),
+    collect_round INT, quote_found_on_page VARCHAR(20)
+) ENGINE=InnoDB COMMENT='原始层：开发商/发行商公布的销量（两轮 AI 收集 + 规则分层，见 src/truth_v2_merge.py）';
+
+CREATE TABLE ods_review_language_counts (
+    appid INT NOT NULL, cohort VARCHAR(20) NOT NULL, cutoff_date DATE NOT NULL, language VARCHAR(20) NOT NULL,
+    total_reviews INT, PRIMARY KEY (appid, cohort, cutoff_date, language)
+) ENGINE=InnoDB COMMENT='原始层：截止日前各语言的评测数';
+
+CREATE TABLE ods_itad_price_history (
+    appid INT NOT NULL, country CHAR(2) NOT NULL, ts VARCHAR(30) NOT NULL, currency CHAR(3),
+    price DECIMAL(12,2), regular DECIMAL(12,2), cut INT,
+    KEY idx_itad_appid_country (appid, country)
+) ENGINE=InnoDB COMMENT='原始层：IsThereAnyDeal 的 Steam 价格历史（美/中/土/巴四个区，只保留到截止日）';
+
+CREATE TABLE ods_itad_bundles (
+    appid INT NOT NULL, bundle_id INT NOT NULL, title VARCHAR(500), page VARCHAR(100), publish VARCHAR(30),
+    PRIMARY KEY (appid, bundle_id)
+) ENGINE=InnoDB COMMENT='原始层：游戏进过的慈善包（IsThereAnyDeal）';
 
 -- ----------------------------------------------------------------------------- 运维表
 CREATE TABLE etl_job_log (
@@ -127,7 +154,7 @@ CREATE TABLE dim_price_scd2 (
 -- ----------------------------------------------------------------------------- 明细层
 CREATE TABLE dwd_game_sample (
     sample_id INT PRIMARY KEY, appid INT NOT NULL, name VARCHAR(255) NOT NULL,
-    cohort VARCHAR(20) NOT NULL COMMENT 'train_2018 / truth',
+    cohort VARCHAR(20) NOT NULL COMMENT 'train_2018 / truth / truth_v2',
     era_group VARCHAR(20) NOT NULL COMMENT 'pre_policy / cross_era / post_policy',
     cutoff_date DATE NOT NULL, release_date DATE NOT NULL COMMENT '实际上架日期（三个来源取最早）',
     release_date_source VARCHAR(30) NOT NULL COMMENT 'store / first_review / steamcharts_first_month',
@@ -141,7 +168,15 @@ CREATE TABLE dwd_game_sample (
     truth_value BIGINT NOT NULL, truth_type VARCHAR(30) NOT NULL,
     k_ratio DECIMAL(14,4) NOT NULL, log_k DECIMAL(12,6) NOT NULL, log_reviews DECIMAL(12,6) NOT NULL,
     log_price DECIMAL(12,6) NOT NULL, model_eligible TINYINT NOT NULL, eligibility_note VARCHAR(500),
-    source_url VARCHAR(1000)
+    source_url VARCHAR(1000),
+    -- 2026-10-20 新增的补充特征（全部只用截止日及以前的数据）
+    share_english DECIMAL(8,5), share_russian DECIMAL(8,5), share_german DECIMAL(8,5), share_french DECIMAL(8,5),
+    share_polish DECIMAL(8,5), share_brazilian DECIMAL(8,5), share_spanish_all DECIMAL(8,5), share_japanese DECIMAL(8,5),
+    share_koreana DECIMAL(8,5), share_tchinese DECIMAL(8,5), share_turkish DECIMAL(8,5),
+    itad_covered TINYINT, price_at_cutoff_usd DECIMAL(10,2) COMMENT '截止日当时的原价（ITAD）',
+    launch_price_usd DECIMAL(10,2), n_discounts INT, max_cut INT, frac_time_discounted DECIMAL(8,5),
+    frac_time_cut75 DECIMAL(8,5), n_bundles INT,
+    ln_regional_cn DECIMAL(10,5), ln_regional_tr DECIMAL(10,5), ln_regional_br DECIMAL(10,5)
 ) ENGINE=InnoDB COMMENT='明细层：样本宽表（一行 = 一款游戏在一个截止日）';
 
 -- ----------------------------------------------------------------------------- 结果层

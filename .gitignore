@@ -4,3 +4,6 @@ data/cache/*
 !data/cache/crawler_checkpoint.json
 __pycache__/
 *.pyc
+
+# 本地密钥（ITAD API Key 等），不进 git
+.env
